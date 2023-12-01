@@ -2,12 +2,65 @@
 #include<string.h>
 #include <stdlib.h>
 #include <errno.h>
-//#include <sys/sgtty.h>
 #include <sys/termios.h>
 #include <sys/stat.h>
+#include <sys/fcntl.h>
 #include <sys/dir.h>
 
 #include <unistd.h>
+
+/*
+
+cc -std=c89 ash.c -o ash
+
+*/
+
+#ifdef __clang__
+struct termios origt,t = {};
+#else
+#include <sys/sgtty.h>
+struct sgttyb new_term_settings;
+#endif
+
+char history[4096];
+int history_maxsize;
+int history_len;
+int history_crp;
+
+void inithistory()
+{
+	history_maxsize = 4096;
+	history_len = 0;
+}
+
+void addhistory(aline)
+char *aline;
+{
+	int len;
+	
+	len = strlen(aline);
+	memcpy(history+history_len, aline, len);
+	history_len += len;
+	history[history_len++] = '\n';
+	history_crp = history_len;
+	
+	printf("history_len = %d\n", history_len);
+	for(len=0; len<history_len; len++ )
+		printf("%02x ", history[len]);
+	printf("\n");
+}
+
+char *prevhistory(aline)
+char *aline;
+{
+	char *ptr;
+	ptr = strrchr(history+history_crp-1, '\n');
+	memcpy(aline, ptr, history_crp - (ptr - history));
+	aline[history_crp - (ptr - history) + 1] = '\0';
+	history_crp = ptr - history;
+	return ptr;
+}
+
 
 void insertch(line, crp)
 char *line;
@@ -100,15 +153,14 @@ readline()
   /* CBREAK input */
 #ifdef __clang__
   /* modern OS no longer support stty as above */
-  struct termios origt,t = {};
   tcgetattr(0, &t);
   origt = t;
   t.c_lflag &= ~(ICANON | ISIG | IEXTEN | ECHO);
   
   tcsetattr(0, TCSANOW, &t);
 #else
-  struct sgttyb new_term_settings;
-  rc = gtty(0, &new_term_settings);
+	rc = gtty(0, &slave_orig_term_settings);
+	new_term_settings = slave_orig_term_settings;
   new_term_settings.sg_flag |= CBREAK;
   stty(0, &new_term_settings);
 #endif
@@ -225,6 +277,8 @@ readline()
 
 #ifdef __clang__
   tcsetattr(0, TCSANOW, &origt);
+#else
+	stty(0, &slave_orig_term_settings);
 #endif
 
   return line;
@@ -248,15 +302,61 @@ char *aline;
 	return c;
 }
 
-int builtins(args)
+void substitutions(args)
 char **args;
 {
+	char *name;
+	
+	while(*args)
+	{
+		if (*args[0] == '$')
+		{
+			name = getenv((*args)+1);
+			if (name)
+				*args = name;
+		}
+		args++;
+	}
+}
+void closedown()
+{
+	char filepath[512];
+	int fd;
+
+#ifdef __clang__
+  tcsetattr(0, TCSANOW, &origt);
+#else
+	stty(0, &slave_orig_term_settings);
+#endif
+
+	strcpy(filepath, getenv("HOME"));
+	strcat(filepath, "/.ash_history");
+printf("closedown: writing to %s\n", filepath);
+
+	fd = open(filepath, O_WRONLY | O_CREAT);
+	write(fd, "sdsd\n", 6);
+	close(fd);
+	
+	exit(0);
+}
+
+void sh_exit(sig)
+int sig;
+{
+	closedown();
+}
+
+int builtins(args, env)
+char **args;
+char **env;
+{
 	char pathname[512];
-	int i;
+	char *name;
+	int i,len;
 	
 		if (!strcmp(args[0], "exit"))
 		{
-			exit(0);
+			closedown();
 		}
 		if (!strcmp(args[0], "LS"))
 		{
@@ -270,9 +370,17 @@ char **args;
 		}
 		if (!strcmp(args[0], "cd"))
 		{
-			if (chdir(args[1]) < 0)
+			name = args[1];
+			if (!name)
+				name = getenv("HOME");
+			if (chdir(name) < 0)
 			{
-				
+				printf("cd: %s: no such directory\n", name);
+			}
+			else
+			{
+				getcwd(pathname, sizeof(pathname));
+				setenv("PWD", pathname, 1);
 			}
 			
 			return 1;
@@ -287,10 +395,29 @@ char **args;
 		}
 		if (!strcmp(args[0], "env") || !strcmp(args[0], "printenv"))
 		{
+			while (*env)
+			{
+				printf("%s\n", *env++);
+			}
+			
 			return 1;
 		}
 		if (!strcmp(args[0], "history"))
 		{
+			name = history;
+			for(i=0; i<history_len; i++)
+			{
+				len = i;
+				while(name[len] != '\n')
+				{
+					len++;
+				}
+				memcpy(pathname, name, (len - i));
+				pathname[(len - i) + 1] = '\0';
+				printf("%s\n", pathname);
+				name += len + 1;
+			}
+		
 			return 1;
 		}
 		if (!strcmp(args[0], "echo"))
@@ -337,32 +464,34 @@ char **env;
   int i,c,bgtask,result;
 
 	signal(SIGINT, SIG_IGN);
+	signal(SIGTERM, sh_exit);
+	inithistory();
 
 	while(1)
 	{
 		aline = readline();
+		printf("\n");
 		if (strlen(aline) > 0)
 		{
-			printf("\ncommand line was: %s\n", aline);
-			printf("----\n");
-			
-			//strcpy(history, aline);
-			
+			addhistory(aline);
+			if (aline[0] == '!' && aline[1] == '!')
+				prevhistory(aline);
+				
 			c = tokenize(args, aline);
 
 			/* $ shell var substitutions */
+			substitutions(args);
 			
 			/* piping */
 			
 			/* background job */
 			bgtask = (args[c-1][0] == '&');
 			
-			if (!builtins(args))
+			if (!builtins(args, env))
 			{
 				strcpy(filepath, args[0]);
 				if (args[0][0] == '.' || args[0][0] == '/' || whereis(filepath, args[0]))
 				{
-					fprintf(stderr, "exec: %s\n", filepath);
 					if (fork() == 0)
 					{
 						signal(SIGINT, SIG_DFL);
