@@ -30,19 +30,30 @@ int history_crp;
 void inithistory()
 {
 	history_maxsize = 4096;
-	history_len = 0;
+	history[0] = '\n';
+	history_len = 1;
 }
 
 void addhistory(aline)
 char *aline;
 {
+	char *ptr;
 	int len;
 	
 	len = strlen(aline);
+
+	if (history_len + len > 200) //sizeof(history))
+	{
+		ptr = history + history_len/2;
+		while(*ptr++ != '\n');
+		memcpy(history+1, ptr, history_len - (ptr-history));
+		history_len -= (ptr-history);
+	}
+
 	memcpy(history+history_len, aline, len);
 	history_len += len;
 	history[history_len++] = '\n';
-	history_crp = history_len;
+	history_crp = history_len - 1;
 	
 	printf("history_len = %d\n", history_len);
 	for(len=0; len<history_len; len++ )
@@ -53,14 +64,49 @@ char *aline;
 char *prevhistory(aline)
 char *aline;
 {
-	char *ptr;
-	ptr = strrchr(history+history_crp-1, '\n');
-	memcpy(aline, ptr, history_crp - (ptr - history));
-	aline[history_crp - (ptr - history) + 1] = '\0';
-	history_crp = ptr - history;
+	char *ptr = history+history_crp;
+	
+	if (history_crp > 0)
+	{
+		while(*--ptr != '\n');
+		ptr++;
+		memcpy(aline, ptr, history_crp - (ptr - history));
+		aline[history_crp - (ptr - history)] = '\0';
+		history_crp = ptr - history - 1;
+	}
 	return ptr;
 }
 
+char *nexthistory(aline)
+char *aline;
+{
+	char *ptr = history+history_crp;
+	if (history_crp < history_len - 1)
+	{
+		while(*ptr++ != '\n');
+		memcpy(aline, ptr+1, (ptr - history) - history_crp);
+		aline[(ptr - history) - history_crp + 1] = '\0';
+		history_crp = ptr - history;
+	}
+	return ptr;
+}
+
+void subhistory(aline)
+char *aline;
+{
+	int hindex;
+	
+	hindex = atoi(aline+1);
+	if (!strcmp(aline, "!!"))
+	{
+		prevhistory(aline);
+	}
+	else
+	if (hindex > 0)
+	{
+		printf("exec element %d in history\n", hindex);
+	}
+}
 
 void insertch(line, crp)
 char *line;
@@ -74,7 +120,7 @@ int crp;
 	}
 }
 
-void delch(line, crp)
+void deletech(line, crp)
 char *line;
 int crp;
 {
@@ -211,7 +257,7 @@ readline()
 		else
 		if (ch == 'D' - 64)
 		{
-			delch(line, len);
+			deletech(line, len);
 		}
 		else
 		if (ch == 'E' - 64)
@@ -227,7 +273,7 @@ readline()
 		else
 		if (ch == 'H' - 64)
 		{
-			delch(line, len);
+			deletech(line, len);
 			if (len > 0)
 				len--;
 		}
@@ -255,18 +301,22 @@ readline()
 		if (ch == 'P' - 64)
 		{
 			printf("previous history\n");
+			prevhistory(line);
+			len = strlen(line);
 		}
 		else
 		if (ch == 'N' - 64)
 		{
 			printf("next history\n");
+			nexthistory(line);
+			len = strlen(line);
 		}
 		else
 		if (ch == 127)
 		{
 			if (len > 0)
 				len--;
-			delch(line, len);
+			deletech(line, len);
 		}
 		else
 		{
@@ -315,6 +365,7 @@ char **args;
 			if (name)
 				*args = name;
 		}
+		
 		args++;
 	}
 }
@@ -333,10 +384,10 @@ void closedown()
 	strcat(filepath, "/.ash_history");
 printf("closedown: writing to %s\n", filepath);
 
-	fd = open(filepath, O_WRONLY | O_CREAT);
-	write(fd, "sdsd\n", 6);
+	fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC);
+	write(fd, history+1, history_len - 1);
 	close(fd);
-	
+
 	exit(0);
 }
 
@@ -351,7 +402,7 @@ char **args;
 char **env;
 {
 	char pathname[512];
-	char *name;
+	char *name,*ptr;
 	int i,len;
 	
 		if (!strcmp(args[0], "exit"))
@@ -404,20 +455,17 @@ char **env;
 		}
 		if (!strcmp(args[0], "history"))
 		{
-			name = history;
-			for(i=0; i<history_len; i++)
+			ptr = history + 1;
+			i = 0;
+			while(ptr - history < history_len)
 			{
-				len = i;
-				while(name[len] != '\n')
-				{
-					len++;
-				}
-				memcpy(pathname, name, (len - i));
-				pathname[(len - i) + 1] = '\0';
-				printf("%s\n", pathname);
-				name += len + 1;
+				name = strchr(ptr, '\n');
+				memcpy(pathname, ptr, name - ptr);
+				pathname[name - ptr] = '\0';
+				printf("%d: %s\n", ++i, pathname);
+				ptr = name + 1;
 			}
-		
+
 			return 1;
 		}
 		if (!strcmp(args[0], "echo"))
@@ -473,13 +521,13 @@ char **env;
 		printf("\n");
 		if (strlen(aline) > 0)
 		{
+			subhistory(aline);
+		
 			addhistory(aline);
-			if (aline[0] == '!' && aline[1] == '!')
-				prevhistory(aline);
-				
+
 			c = tokenize(args, aline);
 
-			/* $ shell var substitutions */
+			/* $var substitutions */
 			substitutions(args);
 			
 			/* piping */
@@ -505,8 +553,10 @@ char **env;
 					if (!bgtask)
 					{
 						wait(&result);
+#ifndef __clang__
 						if (result & 0x80)
 							printf("core dumped\n");
+#endif
 					}
 				}
 				else
