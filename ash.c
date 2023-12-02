@@ -91,7 +91,7 @@ char *aline;
 	return ptr;
 }
 
-void subhistory(aline)
+void history_substitutions(aline)
 char *aline;
 {
 	int hindex;
@@ -352,7 +352,7 @@ char *aline;
 	return c;
 }
 
-void substitutions(args)
+void var_substitutions(args)
 char **args;
 {
 	char *name;
@@ -521,18 +521,19 @@ char **env;
 		printf("\n");
 		if (strlen(aline) > 0)
 		{
-			subhistory(aline);
+			history_substitutions(aline);
 		
 			addhistory(aline);
 
 			c = tokenize(args, aline);
 
-			/* $var substitutions */
-			substitutions(args);
+			var_substitutions(args);
 			
 			/* piping */
 			
-			/* background job */
+			/* redirection */
+			
+			/* is background job */
 			bgtask = (args[c-1][0] == '&');
 			
 			if (!builtins(args, env))
