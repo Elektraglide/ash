@@ -22,16 +22,29 @@ struct termios origt,t = {};
 struct sgttyb new_term_settings;
 #endif
 
-char history[4096];
-int history_maxsize;
+#define MAXHISTORY 1024
+int cmdpid;
+char history[MAXHISTORY];
 int history_len;
 int history_crp;
 
 void inithistory()
 {
-	history_maxsize = 4096;
+	char filepath[512];
+	int fd;
+	
 	history[0] = '\n';
 	history_len = 1;
+	
+	strcpy(filepath, getenv("HOME"));
+	strcat(filepath, "/.ash_history");
+
+	fd = open(filepath, O_RDONLY);
+	if (fd > 0)
+	{
+		history_len = read(fd, history+1, MAXHISTORY-1) + 1;
+		close(fd);
+	}
 }
 
 void addhistory(aline)
@@ -42,7 +55,7 @@ char *aline;
 	
 	len = strlen(aline);
 
-	if (history_len + len > 200) //sizeof(history))
+	if (history_len + len > MAXHISTORY)
 	{
 		ptr = history + history_len/2;
 		while(*ptr++ != '\n');
@@ -55,10 +68,12 @@ char *aline;
 	history[history_len++] = '\n';
 	history_crp = history_len - 1;
 	
+#if 0
 	printf("history_len = %d\n", history_len);
 	for(len=0; len<history_len; len++ )
 		printf("%02x ", history[len]);
 	printf("\n");
+#endif
 }
 
 char *prevhistory(aline)
@@ -94,6 +109,7 @@ char *aline;
 void history_substitutions(aline)
 char *aline;
 {
+	char *ptr;
 	int hindex;
 	
 	hindex = atoi(aline+1);
@@ -104,7 +120,13 @@ char *aline;
 	else
 	if (hindex > 0)
 	{
-		printf("exec element %d in history\n", hindex);
+		ptr = history;
+		while (hindex-- > 0 && ptr - history + 1 < history_len)
+		{
+			ptr = strchr(ptr, '\n') + 1;
+		}
+		if (ptr - history + 1 < history_len)
+			memcpy(aline, ptr, strchr(ptr, '\n') - ptr);
 	}
 }
 
@@ -191,7 +213,7 @@ char *cmd;
 char *
 readline()
 {
-  static char line[256];
+  static char line[512];
   int done = 0;
   int i,lastlen, len = 0;
   char ch;
@@ -462,7 +484,7 @@ char **env;
 				name = strchr(ptr, '\n');
 				memcpy(pathname, ptr, name - ptr);
 				pathname[name - ptr] = '\0';
-				printf("%d: %s\n", ++i, pathname);
+				printf("%4d  %s\n", ++i, pathname);
 				ptr = name + 1;
 			}
 
@@ -507,9 +529,9 @@ char **env;
 {
 	char *path;
   char *aline;
-  char *args[256];
+  char *args[64];
   char filepath[512];
-  int i,c,bgtask,result;
+  int i,c,fgtask,result;
 
 	signal(SIGINT, SIG_IGN);
 	signal(SIGTERM, sh_exit);
@@ -527,6 +549,8 @@ char **env;
 
 			c = tokenize(args, aline);
 
+			/* wildcard expansion */
+
 			var_substitutions(args);
 			
 			/* piping */
@@ -534,14 +558,19 @@ char **env;
 			/* redirection */
 			
 			/* is background job */
-			bgtask = (args[c-1][0] == '&');
+			fgtask = (args[c-1][0] != '&');
+			if (!fgtask)
+			{
+				args[--c] = NULL;
+			}
 			
 			if (!builtins(args, env))
 			{
 				strcpy(filepath, args[0]);
 				if (args[0][0] == '.' || args[0][0] == '/' || whereis(filepath, args[0]))
 				{
-					if (fork() == 0)
+					cmdpid = fork();
+					if (cmdpid == 0)
 					{
 						signal(SIGINT, SIG_DFL);
 						result = execvp(filepath, args);
@@ -549,9 +578,10 @@ char **env;
 						{
 							fprintf(stderr, "Error %d on exec\n", errno);
 						}
+						exit(errno);
 					}
 					
-					if (!bgtask)
+					if (fgtask)
 					{
 						wait(&result);
 #ifndef __clang__
