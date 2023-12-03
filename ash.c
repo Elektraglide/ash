@@ -9,6 +9,7 @@
 
 #include <unistd.h>
 
+extern int kill();
 /*
 
 cc -std=c89 ash.c -o ash
@@ -23,7 +24,8 @@ struct sgttyb new_term_settings;
 #endif
 
 #define MAXHISTORY 1024
-int cmdpid;
+int cmdpid[8];
+int cmdcount;
 char history[MAXHISTORY];
 int history_len;
 int history_crp;
@@ -32,6 +34,8 @@ void inithistory()
 {
 	char filepath[512];
 	int fd;
+	
+	cmdcount = 0;
 	
 	history[0] = '\n';
 	history_len = 1;
@@ -475,6 +479,13 @@ char **env;
 			
 			return 1;
 		}
+		if (!strcmp(args[0], "jobs"))
+		{
+			for (i=0; i<cmdcount; i++)
+			{
+				printf("[%d] Running %d\n", i+1, cmdpid[i]);
+			}
+		}
 		if (!strcmp(args[0], "history"))
 		{
 			ptr = history + 1;
@@ -569,8 +580,29 @@ char **env;
 				strcpy(filepath, args[0]);
 				if (args[0][0] == '.' || args[0][0] == '/' || whereis(filepath, args[0]))
 				{
-					cmdpid = fork();
-					if (cmdpid == 0)
+					if (cmdcount > 3)
+					{
+						result = wait(&result);
+						if (result > 0)
+						{
+							printf("%d exit\n", result);
+							
+							/* find in cmdpid[] and remove */
+							for(i=0; i<8; i++)
+							{
+								if (cmdpid[i] == result)
+								{
+									cmdpid[i] = cmdpid[cmdcount-1];
+									cmdcount--;
+									break;
+								}
+							}
+						}
+					}
+				
+				
+					result = fork();
+					if (result == 0)
 					{
 						signal(SIGINT, SIG_DFL);
 						result = execvp(filepath, args);
@@ -588,6 +620,12 @@ char **env;
 						if (result & 0x80)
 							printf("core dumped\n");
 #endif
+					}
+					else
+					{
+						/* FIXME: how to know when they finish? */
+						cmdpid[cmdcount++] = result;
+						printf("[%d] %d\n", cmdcount, result);
 					}
 				}
 				else
