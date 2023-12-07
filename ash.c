@@ -1,15 +1,18 @@
-#include<stdio.h>
-#include<string.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <sys/termios.h>
-#include <sys/stat.h>
+
+#include <stdio.h>
+#include <string.h>
+#include <errno.h> 
 #include <sys/fcntl.h>
+#include <sys/stat.h>
+#include <signal.h>
+
 #include <sys/dir.h>
 
-#include <unistd.h>
-
+extern void exit();
+extern int atoi();
 extern int kill();
+extern char *getenv();
+
 /*
 
 cc -std=c89 ash.c -o ash
@@ -17,18 +20,36 @@ cc -std=c89 ash.c -o ash
 */
 
 #ifdef __clang__
+#include <sys/termios.h>
+#include <sys/wait.h>
+#include <unistd.h>
 struct termios origt,t = {};
-#else
-#include <sys/sgtty.h>
-struct sgttyb new_term_settings;
 #endif
 
+#ifndef __clang__
+#include <sys/modes.h>
+#include <sys/sgtty.h>
+struct sgttyb slave_orig_term_settings;
+#endif
+
+/* escape sequences */
+char curvis[] = {0x1b, '[', '?', '2', '5', 'h', 0};
+char escape[] = {0x1b, '[', 0};
+char delright[] = {0x1b, '[', '1', 'K', 0};
+
+/* pushd/pop dir */
+int dstacktop = 0;
+char dstack[8][256];
+
+/* history processing */
 #define MAXHISTORY 1024
 int cmdpid[8];
 int cmdcount;
 char history[MAXHISTORY];
 int history_len;
 int history_crp;
+
+char pathname[512];
 
 void inithistory()
 {
@@ -113,9 +134,12 @@ char *aline;
 void history_substitutions(aline)
 char *aline;
 {
-	char *ptr;
+	char *ptr,*cmd;
 	int hindex;
 	
+	if (aline[0] != '!')
+		return;
+		
 	hindex = atoi(aline+1);
 	if (!strcmp(aline, "!!"))
 	{
@@ -131,6 +155,25 @@ char *aline;
 		}
 		if (ptr - history + 1 < history_len)
 			memcpy(aline, ptr, strchr(ptr, '\n') - ptr);
+	}
+	else	/* pattern match */
+	{
+		ptr = history  + history_len - 1;
+		while (ptr > history)
+		{
+			while (*--ptr != '\n');
+			if (ptr)
+			{
+				cmd = ptr + 1;
+				if (strstr(cmd, aline+1) == cmd)
+				{
+					memcpy(aline, cmd, strchr(cmd, '\n') - cmd);
+					break;
+				}
+			}
+		}
+	
+	
 	}
 }
 
@@ -163,7 +206,7 @@ char *partial;
 {
 
   DIR *d;
-  struct dirent *dir;
+  struct direct *dir;
   d = opendir(".");
   if (d)
   {
@@ -187,13 +230,13 @@ char *cmd;
 {
   struct stat info;
   char *apath,*search;
-  char *workingsearch;
+  char workingsearch[1024];
   
   search = getenv("PATH");
 	if (!search)
 			search = "/bin:.";
 	
-	workingsearch = strdup(search);
+	strcpy(workingsearch,search);
   apath = strtok(workingsearch, ":");
   while (apath)
   {
@@ -203,14 +246,12 @@ char *cmd;
       	
     if (stat(filepath, &info) == 0)
     {
-			free(workingsearch);
 			return 1;
     }
 
     apath = strtok(NULL,  ":");
   }
 
-	free(workingsearch);
 	return 0;
 }
 
@@ -219,7 +260,7 @@ readline()
 {
   static char line[512];
   int done = 0;
-  int i,lastlen, len = 0;
+  int rc,i,lastlen, len = 0;
   char ch;
 
   /* CBREAK input */
@@ -231,29 +272,31 @@ readline()
   
   tcsetattr(0, TCSANOW, &t);
 #else
+	struct sgttyb new_term_settings;
 	rc = gtty(0, &slave_orig_term_settings);
 	new_term_settings = slave_orig_term_settings;
   new_term_settings.sg_flag |= CBREAK;
+  new_term_settings.sg_flag &= ~CRMOD;
   stty(0, &new_term_settings);
 #endif
 
-	char curvis[] = {0x1b, '[', '?', '2', '5', 'h', 0};
 	printf("%s", curvis);
 
   memset(line, 0, sizeof(line));
   while(!done)
   {
-		char startline[] = {0x1b, '[', '1', 'G', 0};
-		
 		char *prompt = getenv("PROMPT");
+/*
 		if (!prompt)
-			prompt = "sys++ ";
+*/
+			prompt = "ash++ ";
 			
 		/* TODO: do any substitution in prompt */
 
-    printf("%s%s%s", startline, prompt, line);
-    if (strlen(line) < lastlen) printf("    ");
-    printf("%c\[%dG", 0x1b, (int)strlen(prompt) + len+1);
+		/* FIXME: tek4404 throws newline each time..  */
+
+    printf("%s\r%s%s  ", delright, prompt, line);
+    printf("\r%s%dC", escape, (int)strlen(prompt) + len);
     fflush(stdout);
 
 		lastlen = (int)strlen(line);
@@ -326,14 +369,12 @@ readline()
 		else
 		if (ch == 'P' - 64)
 		{
-			printf("previous history\n");
 			prevhistory(line);
 			len = strlen(line);
 		}
 		else
 		if (ch == 'N' - 64)
 		{
-			printf("next history\n");
 			nexthistory(line);
 			len = strlen(line);
 		}
@@ -356,6 +397,8 @@ readline()
 #else
 	stty(0, &slave_orig_term_settings);
 #endif
+
+	printf("\n");
 
   return line;
 }
@@ -392,13 +435,22 @@ char **args;
 				*args = name;
 		}
 		
+		if (*args[0] == '~')
+		{
+			name = *args;
+			strcpy(pathname, getenv("HOME"));
+			strcat(pathname, name+1);
+			
+			*args = pathname;
+		}
+		
 		args++;
 	}
 }
 void closedown()
 {
 	char filepath[512];
-	int fd;
+	int fd,i;
 
 #ifdef __clang__
   tcsetattr(0, TCSANOW, &origt);
@@ -406,11 +458,17 @@ void closedown()
 	stty(0, &slave_orig_term_settings);
 #endif
 
+	for(i=0; i<cmdcount; i++)
+	{
+		kill(cmdpid[i], SIGKILL);
+	}
+
 	strcpy(filepath, getenv("HOME"));
 	strcat(filepath, "/.ash_history");
 printf("closedown: writing to %s\n", filepath);
 
-	fd = open(filepath, O_WRONLY | O_CREAT | O_TRUNC);
+	creat(filepath, S_IREAD | S_IWRITE);
+	fd = open(filepath, O_WRONLY);
 	write(fd, history+1, history_len - 1);
 	close(fd);
 
@@ -442,6 +500,9 @@ char **env;
 		if (!strcmp(args[0], "pwd"))
 		{
 			getcwd(pathname, sizeof(pathname));
+			name = strrchr(pathname, '\n');
+			if (name)
+				*name = '\0';
 			printf("%s\n", pathname);
 			return 1;
 		}
@@ -456,18 +517,43 @@ char **env;
 			}
 			else
 			{
+#if 0
 				getcwd(pathname, sizeof(pathname));
 				setenv("PWD", pathname, 1);
+#endif
 			}
 			
 			return 1;
 		}
 		if (!strcmp(args[0], "pushd"))
 		{
+			if (dstacktop < 8)
+			{
+				getcwd(dstack[dstacktop], sizeof(dstack[0]));
+				name = strrchr(dstack[dstacktop], '\n');
+				if (name)
+					*name = '\0';
+fprintf(stderr, "%d: pushed %s\n", dstacktop, dstack[dstacktop]);
+				if (chdir(args[1]) < 0)
+				{
+					printf("pushd: %s: no such directory\n", args[1]);
+				}
+				dstacktop++;
+			}
 			return 1;
 		}
 		if (!strcmp(args[0], "popd"))
 		{
+			if (dstacktop > 0)
+			{
+				dstacktop--;
+fprintf(stderr, "%d: pop %s\n", dstacktop, dstack[dstacktop]);
+				if (chdir(dstack[dstacktop]) < 0)
+				{
+					printf("popd: %s: no such directory\n", dstack[dstacktop]);
+				}
+				
+			}
 			return 1;
 		}
 		if (!strcmp(args[0], "env") || !strcmp(args[0], "printenv"))
@@ -485,6 +571,8 @@ char **env;
 			{
 				printf("[%d] Running %d\n", i+1, cmdpid[i]);
 			}
+
+			return 1;
 		}
 		if (!strcmp(args[0], "history"))
 		{
@@ -551,7 +639,6 @@ char **env;
 	while(1)
 	{
 		aline = readline();
-		printf("\n");
 		if (strlen(aline) > 0)
 		{
 			history_substitutions(aline);
