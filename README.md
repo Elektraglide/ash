@@ -1,2 +1,5 @@
 # ash
-Replacement shell with command completion and history implemented in 1 file and no lib dependencies
+Minimal shell with command completion and history.
+  - Implemented in a single file 
+  - no lib dependencies
+  - <40k executable
