@@ -205,6 +205,8 @@ char *partial;
 {
 	char pathname[128];
 	char *expandpos,*lastsep;
+  DIR *d;
+  struct direct *dir;
 
 	expandpos = strrchr(partial, '/');
 	if (expandpos++)
@@ -225,8 +227,6 @@ char *partial;
 	else
 		strcpy(pathname, ".");
 		
-  DIR *d;
-  struct direct *dir;
   d = opendir(pathname);
   if (d)
   {
