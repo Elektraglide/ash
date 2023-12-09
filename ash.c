@@ -200,21 +200,41 @@ int crp;
 	line[i] = '\0';
 }
 
-int complete(fullname, partial)
-char *fullname;
+int complete(partial)
 char *partial;
 {
+	char pathname[128];
+	char *expandpos,*lastsep;
 
+	expandpos = strrchr(partial, '/');
+	if (expandpos++)
+		{}
+	else
+		expandpos = partial;
+
+	strcpy(pathname, partial);
+	if (partial[0] == '~')
+	{
+		strcpy(pathname, getenv("HOME"));
+		strcat(pathname, partial+1);
+	}
+	
+	lastsep = strrchr(pathname, '/');
+	if (lastsep)
+		*lastsep = 0;
+	else
+		strcpy(pathname, ".");
+		
   DIR *d;
   struct direct *dir;
-  d = opendir(".");
+  d = opendir(pathname);
   if (d)
   {
     while ((dir = readdir(d)) != NULL)
     {
-			if (strstr(dir->d_name, partial) == dir->d_name)
+			if (strstr(dir->d_name, expandpos) == dir->d_name)
 			{
-				strcpy(fullname, dir->d_name);
+				strcpy(expandpos, dir->d_name);
 				closedir(d);
 				return 1;
 			}
@@ -295,7 +315,7 @@ readline()
 
 		/* FIXME: tek4404 throws newline each time..  */
 
-    printf("%s\r%s%s  ", delright, prompt, line);
+    printf("%s\r%s%s", delright, prompt, line);
     printf("\r%s%dC", escape, (int)strlen(prompt) + len);
     fflush(stdout);
 
@@ -349,8 +369,7 @@ readline()
 		else
 		if (ch == 'I' - 64)
 		{
-			char partial[64];
-			char fullname[512];
+			char partial[512];
 			
 			/* auto complete */
 			i = len;
@@ -360,9 +379,9 @@ readline()
 				i++;
 				
 			memcpy(partial, line+i, len - i + 1);
-			if (complete(fullname, partial))
+			if (complete(partial))
 			{
-				strcpy(line+i, fullname);
+				strcpy(line+i, partial);
 				len = strlen(line);
 			}
 		}
