@@ -4,7 +4,7 @@
 #include <errno.h> 
 #include <sys/fcntl.h>
 #include <sys/stat.h>
-#include <signal.h>
+#include <sys/signal.h>
 
 #include <sys/dir.h>
 
@@ -17,6 +17,13 @@ extern char *getenv();
 
 cc -std=c89 ash.c -o ash
 
+TODO:
+
+- need to BS before characters show..
+- running login doesn't work (invisible input)
+- missing alias command
+- missing input/output redirection
+
 */
 
 #ifdef __clang__
@@ -24,13 +31,19 @@ cc -std=c89 ash.c -o ash
 #include <sys/wait.h>
 #include <unistd.h>
 struct termios origt,t = {};
+
+#define SIGDEAD SIGCHLD
+#define MAXLINELEN 512
+
 #endif
 
 #ifndef __clang__
 #include <sys/modes.h>
 #include <sys/sgtty.h>
 struct sgttyb slave_orig_term_settings;
+#define MAXLINELEN 128
 #endif
+
 
 /* escape sequences */
 char curvis[] = {0x1b, '[', '?', '2', '5', 'h', 0};
@@ -38,22 +51,27 @@ char escape[] = {0x1b, '[', 0};
 char delright[] = {0x1b, '[', '1', 'K', 0};
 
 /* pushd/pop dir */
+#define MAXPUSH 8
 int dstacktop = 0;
-char dstack[8][256];
+char dstack[MAXPUSH][MAXLINELEN];
+
+/* aliases */
 
 /* history processing */
 #define MAXHISTORY 1024
-int cmdpid[8];
+#define MAXJOBS 8
+int cmdpid[MAXJOBS];
 int cmdcount;
 char history[MAXHISTORY];
 int history_len;
 int history_crp;
 
-char pathname[512];
+/* persistent store of expanded tilda */
+char homeroot[MAXLINELEN];
 
 void inithistory()
 {
-	char filepath[512];
+	char filepath[MAXLINELEN];
 	int fd;
 	
 	cmdcount = 0;
@@ -203,7 +221,7 @@ int crp;
 int complete(partial)
 char *partial;
 {
-	char pathname[128];
+	char pathname[MAXLINELEN];
 	char *expandpos,*lastsep;
   DIR *d;
   struct direct *dir;
@@ -278,7 +296,7 @@ char *cmd;
 char *
 readline()
 {
-  static char line[512];
+  static char line[MAXLINELEN];
   int done = 0;
   int rc,i,lastlen, len = 0;
   char ch;
@@ -312,8 +330,6 @@ readline()
 			prompt = "ash++ ";
 			
 		/* TODO: do any substitution in prompt */
-
-		/* FIXME: tek4404 throws newline each time..  */
 
     printf("%s\r%s%s", delright, prompt, line);
     printf("\r%s%dC", escape, (int)strlen(prompt) + len);
@@ -457,10 +473,10 @@ char **args;
 		if (*args[0] == '~')
 		{
 			name = *args;
-			strcpy(pathname, getenv("HOME"));
-			strcat(pathname, name+1);
+			strcpy(homeroot, getenv("HOME"));
+			strcat(homeroot, name+1);
 			
-			*args = pathname;
+			*args = homeroot;
 		}
 		
 		args++;
@@ -468,7 +484,7 @@ char **args;
 }
 void closedown()
 {
-	char filepath[512];
+	char filepath[MAXLINELEN];
 	int fd,i;
 
 #ifdef __clang__
@@ -504,7 +520,7 @@ int builtins(args, env)
 char **args;
 char **env;
 {
-	char pathname[512];
+	char pathname[MAXLINELEN];
 	char *name,*ptr;
 	int i,len;
 	
@@ -546,13 +562,12 @@ char **env;
 		}
 		if (!strcmp(args[0], "pushd"))
 		{
-			if (dstacktop < 8)
+			if (dstacktop < MAXPUSH)
 			{
 				getcwd(dstack[dstacktop], sizeof(dstack[0]));
 				name = strrchr(dstack[dstacktop], '\n');
 				if (name)
 					*name = '\0';
-fprintf(stderr, "%d: pushed %s\n", dstacktop, dstack[dstacktop]);
 				if (chdir(args[1]) < 0)
 				{
 					printf("pushd: %s: no such directory\n", args[1]);
@@ -566,7 +581,6 @@ fprintf(stderr, "%d: pushed %s\n", dstacktop, dstack[dstacktop]);
 			if (dstacktop > 0)
 			{
 				dstacktop--;
-fprintf(stderr, "%d: pop %s\n", dstacktop, dstack[dstacktop]);
 				if (chdir(dstack[dstacktop]) < 0)
 				{
 					printf("popd: %s: no such directory\n", dstack[dstacktop]);
@@ -586,6 +600,8 @@ fprintf(stderr, "%d: pop %s\n", dstacktop, dstack[dstacktop]);
 		}
 		if (!strcmp(args[0], "jobs"))
 		{
+			if (!cmdcount)
+				printf("No background jobs\n");
 			for (i=0; i<cmdcount; i++)
 			{
 				printf("[%d] Running %d\n", i+1, cmdpid[i]);
@@ -640,6 +656,34 @@ fprintf(stderr, "%d: pop %s\n", dstacktop, dstack[dstacktop]);
 	return 0;
 }
 
+void sh_reap(sig)
+int sig;
+{
+	int result;
+	int pid;
+	int i;
+	
+	pid = wait(&result);
+	if (pid > 0)
+	{
+		/* find in cmdpid[] and remove */
+		for(i=0; i<MAXJOBS; i++)
+		{
+			if (cmdpid[i] == pid)
+			{
+				printf("[%d] %d exit\n", i+1, pid);
+		
+				cmdpid[i] = cmdpid[cmdcount-1];
+				cmdcount--;
+				break;
+			}
+		}
+	}
+
+	signal(SIGDEAD, sh_reap);
+}
+
+
 int main(argc, argv, env)
 int argc;
 char **argv;
@@ -648,11 +692,13 @@ char **env;
 	char *path;
   char *aline;
   char *args[64];
-  char filepath[512];
+  char filepath[MAXLINELEN];
   int i,c,fgtask,result;
 
 	signal(SIGINT, SIG_IGN);
 	signal(SIGTERM, sh_exit);
+	signal(SIGDEAD, sh_reap);
+	
 	inithistory();
 
 	while(1)
@@ -686,27 +732,6 @@ char **env;
 				strcpy(filepath, args[0]);
 				if (args[0][0] == '.' || args[0][0] == '/' || whereis(filepath, args[0]))
 				{
-					if (cmdcount > 3)
-					{
-						result = wait(&result);
-						if (result > 0)
-						{
-							printf("%d exit\n", result);
-							
-							/* find in cmdpid[] and remove */
-							for(i=0; i<8; i++)
-							{
-								if (cmdpid[i] == result)
-								{
-									cmdpid[i] = cmdpid[cmdcount-1];
-									cmdcount--;
-									break;
-								}
-							}
-						}
-					}
-				
-				
 					result = fork();
 					if (result == 0)
 					{
@@ -729,7 +754,6 @@ char **env;
 					}
 					else
 					{
-						/* FIXME: how to know when they finish? */
 						cmdpid[cmdcount++] = result;
 						printf("[%d] %d\n", cmdcount, result);
 					}
