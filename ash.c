@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <string.h>
 #include <errno.h> 
@@ -44,11 +43,6 @@ struct sgttyb slave_orig_term_settings;
 #define MAXLINELEN 128
 #endif
 
-
-/* escape sequences */
-char curvis[] = {0x1b, '[', '?', '2', '5', 'h', 0};
-char escape[] = {0x1b, '[', 0};
-char delright[] = {0x1b, '[', '1', 'K', 0};
 
 /* pushd/pop dir */
 #define MAXPUSH 8
@@ -199,7 +193,7 @@ void insertch(line, crp)
 char *line;
 int crp;
 {
-	int i;
+	register int i;
 	if (line[crp])
 	{
 		for(i=strlen(line); i>crp; i--)
@@ -211,11 +205,11 @@ void deletech(line, crp)
 char *line;
 int crp;
 {
-	int i;
-	int last = strlen(line)+1;
-	for(i=crp; i<last; i++)
-		line[i] = line[i+1];
-	line[i] = '\0';
+	register int i;
+	int last = strlen(line);
+	line[crp] = '\0';
+	for(i=crp; i<=last; i++)
+	  line[i] = line[i+1];
 }
 
 int complete(partial)
@@ -293,12 +287,39 @@ char *cmd;
 	return 0;
 }
 
+int countvisible(str)
+char *str;
+{
+	int count = 0;
+	int state = 1;
+	char c;
+	
+	while((c = *str++) != '\0')
+	{
+		if (c == 0x1b)
+			state = 0;
+		else
+		if (!state)
+		{
+			if (c >= 0x40 && c <= 0x7e && c != '[')
+				state = 1;
+		}
+		else
+		{
+			count += state;
+		}
+	}
+	
+	return count;
+}
+
+
 char *
 readline()
 {
   static char line[MAXLINELEN];
   int done = 0;
-  int rc,i,lastlen, len = 0;
+  int rc,i,lastlen, crp;
   char ch;
 
   /* CBREAK input */
@@ -310,16 +331,18 @@ readline()
   
   tcsetattr(0, TCSANOW, &t);
 #else
-	struct sgttyb new_term_settings;
-	rc = gtty(0, &slave_orig_term_settings);
-	new_term_settings = slave_orig_term_settings;
+  struct sgttyb new_term_settings;
+  rc = gtty(0, &slave_orig_term_settings);
+  new_term_settings = slave_orig_term_settings;
   new_term_settings.sg_flag |= CBREAK;
   new_term_settings.sg_flag &= ~CRMOD;
   stty(0, &new_term_settings);
 #endif
 
-	printf("%s", curvis);
+  /* force visible cursor */
+  printf("\033[?25h");
 
+  crp = 0;
   memset(line, 0, sizeof(line));
   while(!done)
   {
@@ -327,17 +350,26 @@ readline()
 /*
 		if (!prompt)
 */
-			prompt = "ash++ ";
+			prompt = "\033[7mash++\033[0m";
 			
-		/* TODO: do any substitution in prompt */
+    /* TODO: do any substitution in prompt */
 
-    printf("%s\r%s%s", delright, prompt, line);
-    printf("\r%s%dC", escape, (int)strlen(prompt) + len);
+    /* ignore ansi escapes */
+    i = countvisible(prompt);
+
+    printf("\r%s %s\033[K", prompt, line);
+    printf("\r\033[%dC", (i + 1) + crp); /* NB +1 coz cursorx starts at 1 not 0 */
     fflush(stdout);
 
-		lastlen = (int)strlen(line);
+    lastlen = (int)strlen(line);
     read(0, &ch, 1);
-    
+
+if (ch == 'U' - 64)
+{
+  fprintf(stderr, "\012\n%02x %02x %02x %02x  crp=%d\012\n",line[0],line[1],line[2],line[3],crp);
+}
+else
+
     if (ch == '\n')
     {
       done = 1;
@@ -345,13 +377,13 @@ readline()
 		else
 		if (ch == 'A' - 64)
 		{
-			len = 0;
+			crp = 0;
 		}
 		else
 		if (ch == 'B' - 64)
 		{
-			if (len > 0)
-				len--;
+			if (crp > 0)
+				crp--;
 		}
 		else
 		if (ch == 'C' - 64)
@@ -362,25 +394,25 @@ readline()
 		else
 		if (ch == 'D' - 64)
 		{
-			deletech(line, len);
+			deletech(line, crp);
 		}
 		else
 		if (ch == 'E' - 64)
 		{
-			len = strlen(line);
+			crp = strlen(line);
 		}
 		else
 		if (ch == 'F' - 64)
 		{
-			if (line[len])
-				len++;
+			if (line[crp])
+				crp++;
 		}
 		else
 		if (ch == 'H' - 64)
 		{
-			deletech(line, len);
-			if (len > 0)
-				len--;
+			if (crp > 0)
+				crp--;
+			deletech(line, crp);
 		}
 		else
 		if (ch == 'I' - 64)
@@ -388,43 +420,44 @@ readline()
 			char partial[512];
 			
 			/* auto complete */
-			i = len;
+			i = crp;
 			while (i > 0 && line[i] != ' ')
 				i--;
 			if (i)
 				i++;
 				
-			memcpy(partial, line+i, len - i + 1);
+			memcpy(partial, line+i, crp - i + 1);
 			if (complete(partial))
 			{
 				strcpy(line+i, partial);
-				len = strlen(line);
+				crp = strlen(line);
 			}
 		}
 		else
 		if (ch == 'P' - 64)
 		{
 			prevhistory(line);
-			len = strlen(line);
+			crp = strlen(line);
 		}
 		else
 		if (ch == 'N' - 64)
 		{
 			nexthistory(line);
-			len = strlen(line);
+			crp = strlen(line);
 		}
 		else
 		if (ch == 127)
 		{
-			if (len > 0)
-				len--;
-			deletech(line, len);
+			if (crp > 0)
+				crp--;
+			deletech(line, crp);
 		}
 		else
+		if (ch)
 		{
-			insertch(line, len);
-			line[len++] = ch;
-    }
+			insertch(line, crp);
+			line[crp++] = ch;
+ 		}
   }
 
 #ifdef __clang__
@@ -747,10 +780,6 @@ char **env;
 					if (fgtask)
 					{
 						wait(&result);
-#ifndef __clang__
-						if (result & 0x80)
-							printf("core dumped\n");
-#endif
 					}
 					else
 					{
