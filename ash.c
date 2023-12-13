@@ -726,6 +726,8 @@ int sig;
     /* do we need to do this? 'more' just hangs */
     kill(runningtask, SIGTERM);
   }
+  /* re-enable */  
+  signal(SIGINT, sh_int);
 }
 
 int main(argc, argv, env)
