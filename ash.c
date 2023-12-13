@@ -63,6 +63,8 @@ int history_crp;
 /* persistent store of expanded tilda */
 char homeroot[MAXLINELEN];
 
+int runningtask;
+
 void inithistory()
 {
 	char filepath[MAXLINELEN];
@@ -347,9 +349,7 @@ readline()
   while(!done)
   {
 		char *prompt = getenv("PROMPT");
-/*
 		if (!prompt)
-*/
 			prompt = "\033[7mash++\033[0m";
 			
     /* TODO: do any substitution in prompt */
@@ -716,19 +716,31 @@ int sig;
 	signal(SIGDEAD, sh_reap);
 }
 
+void sh_int(sig)
+int sig;
+{
+  if (runningtask)
+  {
+    kill(runningtask, SIGINT);
+ 
+    /* do we need to do this? 'more' just hangs */
+    kill(runningtask, SIGTERM);
+  }
+}
 
 int main(argc, argv, env)
 int argc;
 char **argv;
 char **env;
 {
-	char *path;
+  char *path;
   char *aline;
   char *args[64];
   char filepath[MAXLINELEN];
-  int i,c,fgtask,result;
+  int i,c,fgtask,nctask,result;
 
-	signal(SIGINT, SIG_IGN);
+	runningtask = 0;
+	signal(SIGINT, sh_int);
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
 	
@@ -753,6 +765,14 @@ char **env;
 			
 			/* redirection */
 			
+
+			/* is NICE task */
+			nctask = !strcmp(argv[0], "nice");
+			if (nctask)
+			{
+			  memcpy(argv, argv+1, sizeof(char *) * c);
+			}
+			
 			/* is background job */
 			fgtask = (args[c-1][0] != '&');
 			if (!fgtask)
@@ -765,9 +785,11 @@ char **env;
 				strcpy(filepath, args[0]);
 				if (args[0][0] == '.' || args[0][0] == '/' || whereis(filepath, args[0]))
 				{
-					result = fork();
-					if (result == 0)
+					runningtask = fork();
+					if (runningtask == 0)
 					{
+						if (nctask) nice(10);
+						
 						signal(SIGINT, SIG_DFL);
 						result = execvp(filepath, args);
 						if (result < 0)
@@ -783,9 +805,10 @@ char **env;
 					}
 					else
 					{
-						cmdpid[cmdcount++] = result;
-						printf("[%d] %d\n", cmdcount, result);
+						cmdpid[cmdcount++] = runningtask;
+						printf("[%d] %d\n", cmdcount, runningtask);
 					}
+					runningtask = 0;
 				}
 				else
 				{
