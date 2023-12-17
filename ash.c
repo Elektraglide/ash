@@ -29,6 +29,7 @@ TODO:
 #include <sys/termios.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sgtty.h>
 struct termios origt,t = {};
 
 #define SIGDEAD SIGCHLD
@@ -39,10 +40,10 @@ struct termios origt,t = {};
 #ifndef __clang__
 #include <sys/modes.h>
 #include <sys/sgtty.h>
-struct sgttyb slave_orig_term_settings;
 #define MAXLINELEN 128
 #endif
 
+struct sgttyb slave_orig_term_settings;
 
 /* pushd/pop dir */
 #define MAXPUSH 8
@@ -315,6 +316,24 @@ char *str;
 	return count;
 }
 
+void printdstack(pwd)
+char *pwd;
+{
+  int i;
+  
+  if (pwd)
+  {
+		printf(pwd);
+		putchar(' ');
+	}
+  i = dstacktop;
+  while (i-- > 0)
+  {
+    printf(dstack[i]);
+		putchar(' ');
+  }
+		putchar('\n');
+}
 
 char *
 readline()
@@ -334,7 +353,6 @@ readline()
   tcsetattr(0, TCSANOW, &t);
 #else
   struct sgttyb new_term_settings;
-  rc = gtty(0, &slave_orig_term_settings);
   new_term_settings = slave_orig_term_settings;
   new_term_settings.sg_flag |= CBREAK;
   new_term_settings.sg_flag &= ~CRMOD;
@@ -606,6 +624,11 @@ char **env;
 					printf("pushd: %s: no such directory\n", args[1]);
 				}
 				dstacktop++;
+				getcwd(pathname, sizeof(pathname));
+				name = strrchr(pathname, '\n');
+				if (name)
+					*name = '\0';
+				printdstack(pathname);
 			}
 			return 1;
 		}
@@ -613,12 +636,12 @@ char **env;
 		{
 			if (dstacktop > 0)
 			{
+				printdstack(NULL);
 				dstacktop--;
 				if (chdir(dstack[dstacktop]) < 0)
 				{
 					printf("popd: %s: no such directory\n", dstack[dstacktop]);
 				}
-				
 			}
 			return 1;
 		}
@@ -626,7 +649,8 @@ char **env;
 		{
 			while (*env)
 			{
-				printf("%s\n", *env++);
+				printf(*env++);
+				putchar('\n');
 			}
 			
 			return 1;
@@ -662,10 +686,11 @@ char **env;
 			i = 1;
 			while(args[i])
 			{
-				printf("%s ", args[i]);
+				printf(args[i]);
+				putchar(' ');
 				i++;
 			}
-			printf("\n");
+			putchar('\n');
 			return 1;
 		}
 		if (!strcmp(args[0], "alias"))
@@ -739,13 +764,16 @@ char **env;
   char *aline;
   char *args[64];
   char filepath[MAXLINELEN];
-  int i,c,fgtask,nctask,result;
+  int fd,i,c,fgtask,nctask,result;
 
 	runningtask = 0;
 	signal(SIGINT, sh_int);
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
-	
+
+  /* initial terminal settings */
+  gtty(0, &slave_orig_term_settings);
+
 	inithistory();
 
 	while(1)
@@ -790,8 +818,18 @@ char **env;
 					runningtask = fork();
 					if (runningtask == 0)
 					{
-						if (nctask) nice(10);
+						if (nctask)
+						{
+							nice(10);
+						}
 						
+						if (!fgtask)
+						{
+							/* force stdin to be /dev/null */
+							fd = open("/dev/null", O_RDONLY);
+							dup2(fd, 0);
+						}
+
 						signal(SIGINT, SIG_DFL);
 						result = execvp(filepath, args);
 						if (result < 0)
@@ -804,6 +842,9 @@ char **env;
 					if (fgtask)
 					{
 						wait(&result);
+						
+						/* restore terminal */
+						stty(0, &slave_orig_term_settings);
 					}
 					else
 					{
