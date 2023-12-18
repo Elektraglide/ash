@@ -518,7 +518,7 @@ else
 	stty(0, &slave_orig_term_settings);
 #endif
 
-	printf("\n");
+	putchar('\n');
 
   return line;
 }
@@ -585,7 +585,7 @@ void closedown()
 
 	strcpy(filepath, getenv("HOME"));
 	strcat(filepath, "/.ash_history");
-printf("closedown: writing to %s\n", filepath);
+	/* printf("closedown: writing to %s\n", filepath); */
 
 	creat(filepath, S_IREAD | S_IWRITE);
 	fd = open(filepath, O_WRONLY);
@@ -615,12 +615,14 @@ char **env;
 		}
 		if (!strcmp(args[0], "LS"))
 		{
+			printf("ash\n");
 			return 1;
 		}
 		if (!strcmp(args[0], "pwd"))
 		{
 			prettygetcwd(pathname, sizeof(pathname));
-			printf("%s\n", pathname);
+			printf(pathname);
+			putchar('\n');
 			return 1;
 		}
 		if (!strcmp(args[0], "cd"))
@@ -641,6 +643,12 @@ char **env;
 			}
 			
 			return 1;
+		}
+		if (!strcmp(args[0], "dirs"))
+		{
+				prettygetcwd(pathname, sizeof(pathname));
+				printdstack(pathname);
+				return 1;
 		}
 		if (!strcmp(args[0], "pushd"))
 		{
@@ -734,7 +742,33 @@ char **env;
 		{
 			return 1;
 		}
-
+		
+		/* fake alias */
+		if (!strcmp(args[0], "ps"))
+		{
+			args[0] = "status";
+			args[1] = "+axl";
+			args[2] = NULL;
+			return 0;
+		}
+		if (!strcmp(args[0], "cp"))
+		{
+			args[0] = "copy";
+			return 0;
+		}
+		if (!strcmp(args[0], "chmod"))
+		{
+			args[0] = "perms";
+			return 0;
+		}
+		if (!strcmp(args[0], "df"))
+		{
+			args[0] = "free";
+			args[1] = "/dev/disk";
+			args[2] = NULL;
+			return 0;
+		}
+		
 
 	return 0;
 }
