@@ -29,6 +29,7 @@ TODO:
 #include <sys/termios.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/ioctl_compat.h>
 #include <sgtty.h>
 struct termios origt,t = {};
 
@@ -259,6 +260,7 @@ char *partial;
   return(0);
 }
 
+
 int whereis(filepath, cmd)
 char *filepath;
 char *cmd;
@@ -320,19 +322,51 @@ void printdstack(pwd)
 char *pwd;
 {
   int i;
+  char *home;
+  char pathname[512];
   
+	home = getenv("HOME");
   if (pwd)
   {
-		printf(pwd);
+		strcpy(pathname, pwd);
+		if (strstr(pathname, home) == pathname)
+		{
+			pathname[0] = '~';
+			memcpy(pathname+1, pathname+strlen(home), strlen(pathname));
+		}
+	
+    printf(pathname);
 		putchar(' ');
 	}
+
   i = dstacktop;
   while (i-- > 0)
   {
-    printf(dstack[i]);
+		strcpy(pathname, dstack[i]);
+		if (strstr(pathname, home) == pathname)
+		{
+			pathname[0] = '~';
+			memcpy(pathname+1, pathname+strlen(home), strlen(pathname));
+		}
+	
+    printf(pathname);
 		putchar(' ');
   }
 		putchar('\n');
+}
+
+char *prettygetcwd(pathname, len)
+char *pathname;
+int len;
+{
+	char *name;
+	
+	getcwd(pathname, len);
+	name = strrchr(pathname, '\n');
+	if (name)
+		*name = '\0';
+
+	return pathname;
 }
 
 char *
@@ -585,10 +619,7 @@ char **env;
 		}
 		if (!strcmp(args[0], "pwd"))
 		{
-			getcwd(pathname, sizeof(pathname));
-			name = strrchr(pathname, '\n');
-			if (name)
-				*name = '\0';
+			prettygetcwd(pathname, sizeof(pathname));
 			printf("%s\n", pathname);
 			return 1;
 		}
@@ -615,19 +646,13 @@ char **env;
 		{
 			if (dstacktop < MAXPUSH)
 			{
-				getcwd(dstack[dstacktop], sizeof(dstack[0]));
-				name = strrchr(dstack[dstacktop], '\n');
-				if (name)
-					*name = '\0';
+				prettygetcwd(dstack[dstacktop], sizeof(dstack[0]));
 				if (chdir(args[1]) < 0)
 				{
 					printf("pushd: %s: no such directory\n", args[1]);
 				}
 				dstacktop++;
-				getcwd(pathname, sizeof(pathname));
-				name = strrchr(pathname, '\n');
-				if (name)
-					*name = '\0';
+				prettygetcwd(pathname, sizeof(pathname));
 				printdstack(pathname);
 			}
 			return 1;
@@ -797,10 +822,11 @@ char **env;
 			
 
 			/* is NICE task */
-			nctask = !strcmp(argv[0], "nice");
+			nctask = strcmp(args[0], "nice") == 0;
 			if (nctask)
 			{
-			  memcpy(argv, argv+1, sizeof(char *) * c);
+			  memcpy(args, args+1, sizeof(char *) * c);
+			  c--;
 			}
 			
 			/* is background job */
