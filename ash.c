@@ -787,7 +787,7 @@ char **env;
 {
   char *path;
   char *aline;
-  char *args[64];
+  char *cmdtokens[64];
   char filepath[MAXLINELEN];
   int fd,i,c,fgtask,nctask,result;
 
@@ -810,11 +810,11 @@ char **env;
 		
 			addhistory(aline);
 
-			c = tokenize(args, aline);
+			c = tokenize(cmdtokens, aline);
 
 			/* wildcard expansion */
 
-			var_substitutions(args);
+			var_substitutions(cmdtokens);
 			
 			/* piping */
 			
@@ -822,24 +822,24 @@ char **env;
 			
 
 			/* is NICE task */
-			nctask = strcmp(args[0], "nice") == 0;
+			nctask = strcmp(cmdtokens[0], "nice") == 0;
 			if (nctask)
 			{
-			  memcpy(args, args+1, sizeof(char *) * c);
+			  memcpy(cmdtokens, cmdtokens+1, sizeof(char *) * c);
 			  c--;
 			}
 			
 			/* is background job */
-			fgtask = (args[c-1][0] != '&');
+			fgtask = (cmdtokens[c-1][0] != '&');
 			if (!fgtask)
 			{
-				args[--c] = NULL;
+				cmdtokens[--c] = NULL;
 			}
 			
-			if (!builtins(args, env))
+			if (!builtins(cmdtokens, env))
 			{
-				strcpy(filepath, args[0]);
-				if (args[0][0] == '.' || args[0][0] == '/' || whereis(filepath, args[0]))
+				strcpy(filepath, cmdtokens[0]);
+				if (cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/' || whereis(filepath, cmdtokens[0]))
 				{
 					runningtask = fork();
 					if (runningtask == 0)
@@ -857,7 +857,7 @@ char **env;
 						}
 
 						signal(SIGINT, SIG_DFL);
-						result = execvp(filepath, args);
+						result = execvp(filepath, cmdtokens);
 						if (result < 0)
 						{
 							fprintf(stderr, "Error %d on exec\n", errno);
@@ -881,7 +881,7 @@ char **env;
 				}
 				else
 				{
-					printf("%s: command not found\n", args[0]);
+					printf("%s: command not found\n", cmdtokens[0]);
 				}
 			}
 		}
