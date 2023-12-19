@@ -26,6 +26,7 @@ TODO:
 */
 
 #ifdef __clang__
+#include <stdlib.h>
 #include <sys/termios.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -45,6 +46,10 @@ struct termios origt,t = {};
 #endif
 
 struct sgttyb slave_orig_term_settings;
+
+typedef struct {
+	char name[20];
+} lsentry;
 
 /* pushd/pop dir */
 #define MAXPUSH 8
@@ -601,6 +606,16 @@ int sig;
 	closedown();
 }
 
+int cmplsentry(a,b)
+int *a;
+int *b;
+{
+	lsentry *x = (lsentry *)a;
+	lsentry *y = (lsentry *)b;
+
+	return strcmp(x->name, y->name);
+}
+
 int builtins(args, env)
 char **args;
 char **env;
@@ -613,10 +628,69 @@ char **env;
 		{
 			closedown();
 		}
-		if (!strcmp(args[0], "LS"))
+		if (!strcmp(args[0], "ls"))
 		{
-			printf("ash\n");
-			return 1;
+			/* only if its simple column output */
+			if (args[1] == NULL)
+			{
+				DIR *d;
+				struct direct *dir;
+				struct stat info;
+				lsentry *entries;
+				int numentries = 0;
+				int maxentries = 64;
+				
+				entries = (lsentry *)malloc(sizeof(lsentry) * maxentries);
+				prettygetcwd(pathname, sizeof(pathname));
+				d = opendir(pathname);
+				strcat(pathname, "/");
+				len = strlen(pathname);
+				if (d)
+				{
+					while ((dir = readdir(d)) != NULL)
+					{
+						strncpy(entries[numentries].name, dir->d_name, sizeof(lsentry)-2);
+						
+						strcpy(pathname + len, dir->d_name);
+						stat(pathname, &info);
+#ifndef __clang__
+						if (info.st_perm & S_IEXEC)
+						{
+							strcat(entries[numentries].name, "*");
+						}
+#endif
+						if (info.st_mode & S_IFDIR)
+						{
+							if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
+								strcat(entries[numentries].name, "/");
+						}
+
+						numentries++;
+						if (numentries > maxentries)
+						{
+							maxentries *= 2;
+							entries = (lsentry *)realloc(entries, sizeof(lsentry) * maxentries);
+						}
+					}
+					closedir(d);
+					
+					qsort(entries, numentries, sizeof(lsentry), cmplsentry);
+					
+					for (len=0; len<numentries/3; len++)
+					{
+						for (i=0; i<numentries; i+= (numentries+1)/4)
+						{
+								if (i+len < numentries) printf("%-20s", entries[i+len].name);
+						}
+						printf("\n");
+ 					}
+
+				}
+
+				free(entries);
+			
+				return 1;
+			}
 		}
 		if (!strcmp(args[0], "pwd"))
 		{
