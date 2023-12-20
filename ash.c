@@ -583,6 +583,11 @@ void closedown()
 	stty(0, &slave_orig_term_settings);
 #endif
 
+  	if (runningtask)
+  	{
+    		kill(runningtask, SIGKILL);	
+  	}
+
 	for(i=0; i<cmdcount; i++)
 	{
 		kill(cmdpid[i], SIGKILL);
