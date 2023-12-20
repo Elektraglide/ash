@@ -653,17 +653,18 @@ char **env;
 						
 						strcpy(pathname + len, dir->d_name);
 						stat(pathname, &info);
+
 #ifndef __clang__
 						if (info.st_perm & S_IEXEC)
 						{
 							strcat(entries[numentries].name, "*");
 						}
 #endif
-						if (info.st_mode & S_IFDIR)
-						{
-							if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
-								strcat(entries[numentries].name, "/");
-						}
+				if ((info.st_mode & S_IFDIR) == S_IFDIR)
+				{
+					if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
+						strcat(entries[numentries].name, "/");
+				}
 
 						numentries++;
 						if (numentries > maxentries)
@@ -678,7 +679,7 @@ char **env;
 					
 					for (len=0; len<numentries/3; len++)
 					{
-						for (i=0; i<numentries; i+= (numentries+1)/4)
+						for (i=0; i<numentries; i+= (numentries+3)/4)
 						{
 								if (i+len < numentries) printf("%-20s", entries[i+len].name);
 						}
