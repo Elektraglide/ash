@@ -405,9 +405,9 @@ readline()
   memset(line, 0, sizeof(line));
   while(!done)
   {
-		char *prompt = getenv("PROMPT");
-		if (!prompt)
-			prompt = "\033[7mash++\033[0m";
+    char *prompt = getenv("PROMPT");
+    if (!prompt)
+      prompt = "\033[7mash++\033[0m";
 			
     /* TODO: do any substitution in prompt */
 
@@ -902,6 +902,8 @@ char **env;
   char *path;
   char *aline;
   char *cmdtokens[64];
+  char *fin, *fout;
+  int  finfd, foutfd;
   char filepath[MAXLINELEN];
   int fd,i,c,fgtask,nctask,result;
 
@@ -932,9 +934,6 @@ char **env;
 			
 			/* piping */
 			
-			/* redirection */
-			
-
 			/* is NICE task */
 			nctask = strcmp(cmdtokens[0], "nice") == 0;
 			if (nctask)
@@ -943,6 +942,28 @@ char **env;
 			  c--;
 			}
 			
+			/* redirection */
+			fin = NULL;
+			fout = NULL;
+			for(i=1; i<c; i++)
+			{
+				if (cmdtokens[i] && cmdtokens[i][0] == '>')
+				{
+					fout = cmdtokens[i+1];
+					memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
+					c -= 2;
+					i += 2;
+				}
+				if (cmdtokens[i] && cmdtokens[i][0] == '<')
+				{
+					fin = cmdtokens[i+1];
+					memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
+					c -= 2;
+					i += 2;
+				}
+			}
+			
+
 			/* is background job */
 			fgtask = (cmdtokens[c-1][0] != '&');
 			if (!fgtask)
@@ -955,14 +976,34 @@ char **env;
 				strcpy(filepath, cmdtokens[0]);
 				if (cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/' || whereis(filepath, cmdtokens[0]))
 				{
+					/* redirect stdio */
+					finfd = 0;
+					foutfd = 0;
+					if (fin)
+					{
+						creat(fin, S_IREAD | S_IWRITE);
+						finfd = open(fin, O_RDONLY);
+					}
+					if (fout)
+					{
+						creat(fout, S_IREAD | S_IWRITE);
+                                                foutfd = open(fout, O_WRONLY);
+					}
+						
 					runningtask = fork();
-					if (runningtask == 0)
+                                        if (runningtask == 0)
 					{
 						if (nctask)
 						{
 							nice(10);
 						}
-						
+
+						/* redirect stdio */
+						if (finfd > 0)
+							dup2(finfd, 0);
+						if (foutfd > 0)
+							dup2(foutfd, 1);
+
 						if (!fgtask)
 						{
 							/* force stdin to be /dev/null */
@@ -981,8 +1022,13 @@ char **env;
 					
 					if (fgtask)
 					{
-						wait(&result);
+						c = wait(&result);
 						
+						if (finfd)
+							close(finfd);
+						if (foutfd)
+							close(foutfd);
+
 						/* restore terminal */
 						stty(0, &slave_orig_term_settings);
 					}
