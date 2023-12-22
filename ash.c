@@ -627,7 +627,7 @@ char **env;
 {
 	char pathname[MAXLINELEN];
 	char *name,*ptr;
-	int i,len;
+	int i,j,len;
 	
 		if (!strcmp(args[0], "exit"))
 		{
@@ -659,17 +659,18 @@ char **env;
 						strcpy(pathname + len, dir->d_name);
 						stat(pathname, &info);
 
+						if ((info.st_mode & S_IFDIR) == S_IFDIR)
+						{
+							if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
+								strcat(entries[numentries].name, "/");
+						}
 #ifndef __clang__
+						else
 						if (info.st_perm & S_IEXEC)
 						{
 							strcat(entries[numentries].name, "*");
 						}
 #endif
-				if ((info.st_mode & S_IFDIR) == S_IFDIR)
-				{
-					if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
-						strcat(entries[numentries].name, "/");
-				}
 
 						numentries++;
 						if (numentries > maxentries)
@@ -682,9 +683,11 @@ char **env;
 					
 					qsort(entries, numentries, sizeof(lsentry), cmplsentry);
 					
-					for (len=0; len<numentries/3; len++)
+					/* stride through list */
+					j = (numentries+3)/4;
+					for (len=0; len<j; len++)
 					{
-						for (i=0; i<numentries; i+= (numentries+3)/4)
+						for (i=0; i<numentries; i+= j)
 						{
 								if (i+len < numentries) printf("%-20s", entries[i+len].name);
 						}
