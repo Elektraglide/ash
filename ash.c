@@ -35,7 +35,7 @@ TODO:
 struct termios origt,t = {};
 
 #define SIGDEAD SIGCHLD
-#define MAXLINELEN 512
+#define MAXLINELEN 256
 
 #endif
 
@@ -491,6 +491,12 @@ else
 			}
 		}
 		else
+		if (ch == 'L' - 64)
+		{
+			putchar('\r');
+			putchar('\n');
+		}
+		else
 		if (ch == 'P' - 64)
 		{
 			prevhistory(line);
@@ -897,18 +903,159 @@ int sig;
   signal(SIGINT, sh_int);
 }
 
+
+int do_separators(aline, env)
+char *aline;
+char **env;
+{
+  char filepath[MAXLINELEN];
+  char *cmdtokens[64];
+  char *fin, *fout;
+  int  finfd, foutfd;
+  int fd,i,c,fgtask,nctask,result;
+	char *phrase,*phraseend;
+
+	phrase = aline;
+	do
+	{
+		/* get next run up to semi-colon separator */
+		phraseend = strchr(phrase, ';');
+		if (phraseend)
+		{
+			*phraseend = '\0';
+		}
+	
+		c = tokenize(cmdtokens, phrase);
+
+		/* wildcard expansion */
+
+		var_substitutions(cmdtokens);
+		
+		/* piping */
+		
+		/* is NICE task */
+		nctask = strcmp(cmdtokens[0], "nice") == 0;
+		if (nctask)
+		{
+			memcpy(cmdtokens, cmdtokens+1, sizeof(char *) * c);
+			c--;
+		}
+		
+		/* redirection */
+		fin = NULL;
+		fout = NULL;
+		for(i=1; i<c; i++)
+		{
+			if (cmdtokens[i] && cmdtokens[i][0] == '>')
+			{
+				fout = cmdtokens[i+1];
+				memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
+				c -= 2;
+				i += 2;
+			}
+			if (cmdtokens[i] && cmdtokens[i][0] == '<')
+			{
+				fin = cmdtokens[i+1];
+				memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
+				c -= 2;
+				i += 2;
+			}
+		}
+
+		/* is background job */
+		fgtask = (cmdtokens[c-1][0] != '&');
+		if (!fgtask)
+		{
+			cmdtokens[--c] = NULL;
+		}
+		
+		if (!builtins(cmdtokens, env))
+		{
+			strcpy(filepath, cmdtokens[0]);
+			if (cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/' || whereis(filepath, cmdtokens[0]))
+			{
+				/* redirect stdio */
+				finfd = 0;
+				foutfd = 0;
+				if (fin)
+				{
+					creat(fin, S_IREAD | S_IWRITE);
+					finfd = open(fin, O_RDONLY);
+				}
+				if (fout)
+				{
+					creat(fout, S_IREAD | S_IWRITE);
+					foutfd = open(fout, O_WRONLY);
+				}
+					
+				runningtask = fork();
+				if (runningtask == 0)
+				{
+					if (nctask)
+					{
+						nice(10);
+					}
+
+					/* redirect stdio */
+					if (finfd > 0)
+						dup2(finfd, 0);
+					if (foutfd > 0)
+						dup2(foutfd, 1);
+
+					if (!fgtask && !finfd)
+					{
+						/* force stdin to be /dev/null */
+						fd = open("/dev/null", O_RDONLY);
+						dup2(fd, 0);
+					}
+
+					signal(SIGINT, SIG_DFL);
+					result = execvp(filepath, cmdtokens);
+					if (result < 0)
+					{
+						fprintf(stderr, "Error %d on exec\n", errno);
+					}
+					exit(errno);
+				}
+				
+				if (fgtask)
+				{
+					c = wait(&result);
+					
+					if (finfd)
+						close(finfd);
+					if (foutfd)
+						close(foutfd);
+
+					/* restore terminal */
+					stty(0, &slave_orig_term_settings);
+				}
+				else
+				{
+					cmdpid[cmdcount++] = runningtask;
+					printf("[%d] %d\n", cmdcount, runningtask);
+				}
+				runningtask = 0;
+			}
+			else
+			{
+				printf("%s: command not found\n", cmdtokens[0]);
+			}
+		}
+
+		phrase = phraseend ? phraseend + 1 : NULL;
+
+	} while(phrase);
+
+	return 0;
+}
+
 int main(argc, argv, env)
 int argc;
 char **argv;
 char **env;
 {
-  char *path;
   char *aline;
-  char *cmdtokens[64];
-  char *fin, *fout;
-  int  finfd, foutfd;
-  char filepath[MAXLINELEN];
-  int fd,i,c,fgtask,nctask,result;
 
 	runningtask = 0;
 	signal(SIGINT, sh_int);
@@ -929,124 +1076,8 @@ char **env;
 		
 			addhistory(aline);
 
-			c = tokenize(cmdtokens, aline);
+			do_separators(aline, env);
 
-			/* wildcard expansion */
-
-			var_substitutions(cmdtokens);
-			
-			/* piping */
-			
-			/* is NICE task */
-			nctask = strcmp(cmdtokens[0], "nice") == 0;
-			if (nctask)
-			{
-			  memcpy(cmdtokens, cmdtokens+1, sizeof(char *) * c);
-			  c--;
-			}
-			
-			/* redirection */
-			fin = NULL;
-			fout = NULL;
-			for(i=1; i<c; i++)
-			{
-				if (cmdtokens[i] && cmdtokens[i][0] == '>')
-				{
-					fout = cmdtokens[i+1];
-					memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
-					c -= 2;
-					i += 2;
-				}
-				if (cmdtokens[i] && cmdtokens[i][0] == '<')
-				{
-					fin = cmdtokens[i+1];
-					memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
-					c -= 2;
-					i += 2;
-				}
-			}
-			
-
-			/* is background job */
-			fgtask = (cmdtokens[c-1][0] != '&');
-			if (!fgtask)
-			{
-				cmdtokens[--c] = NULL;
-			}
-			
-			if (!builtins(cmdtokens, env))
-			{
-				strcpy(filepath, cmdtokens[0]);
-				if (cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/' || whereis(filepath, cmdtokens[0]))
-				{
-					/* redirect stdio */
-					finfd = 0;
-					foutfd = 0;
-					if (fin)
-					{
-						creat(fin, S_IREAD | S_IWRITE);
-						finfd = open(fin, O_RDONLY);
-					}
-					if (fout)
-					{
-						creat(fout, S_IREAD | S_IWRITE);
-                                                foutfd = open(fout, O_WRONLY);
-					}
-						
-					runningtask = fork();
-                                        if (runningtask == 0)
-					{
-						if (nctask)
-						{
-							nice(10);
-						}
-
-						/* redirect stdio */
-						if (finfd > 0)
-							dup2(finfd, 0);
-						if (foutfd > 0)
-							dup2(foutfd, 1);
-
-						if (!fgtask)
-						{
-							/* force stdin to be /dev/null */
-							fd = open("/dev/null", O_RDONLY);
-							dup2(fd, 0);
-						}
-
-						signal(SIGINT, SIG_DFL);
-						result = execvp(filepath, cmdtokens);
-						if (result < 0)
-						{
-							fprintf(stderr, "Error %d on exec\n", errno);
-						}
-						exit(errno);
-					}
-					
-					if (fgtask)
-					{
-						c = wait(&result);
-						
-						if (finfd)
-							close(finfd);
-						if (foutfd)
-							close(foutfd);
-
-						/* restore terminal */
-						stty(0, &slave_orig_term_settings);
-					}
-					else
-					{
-						cmdpid[cmdcount++] = runningtask;
-						printf("[%d] %d\n", cmdcount, runningtask);
-					}
-					runningtask = 0;
-				}
-				else
-				{
-					printf("%s: command not found\n", cmdtokens[0]);
-				}
-			}
 		}
 	}
 }
