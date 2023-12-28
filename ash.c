@@ -912,7 +912,7 @@ char **env;
   char *cmdtokens[64];
   char *fin, *fout;
   int  finfd, foutfd;
-  int fd,i,c,fgtask,nctask,result;
+  int fd,i,j,c,fgtask,nctask,result;
 	char *phrase,*phraseend;
 
 	phrase = aline;
@@ -946,19 +946,38 @@ char **env;
 		fout = NULL;
 		for(i=1; i<c; i++)
 		{
+			
 			if (cmdtokens[i] && cmdtokens[i][0] == '>')
 			{
-				fout = cmdtokens[i+1];
-				memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
-				c -= 2;
-				i += 2;
+				j = i;
+				fout = cmdtokens[i] + 1;
+
+				/* is filename in next arg? */
+				if (fout[0] == 0)
+				{
+					i++;
+					fout = cmdtokens[i];
+					c--;
+				}
+				memcpy(cmdtokens+j, cmdtokens+i+1, sizeof(char *) * c-j);
+				c--;
 			}
+			else
 			if (cmdtokens[i] && cmdtokens[i][0] == '<')
 			{
-				fin = cmdtokens[i+1];
-				memcpy(cmdtokens+i, cmdtokens+i+2, sizeof(char *) * c-i);
-				c -= 2;
-				i += 2;
+				j = i;
+				fin = cmdtokens[i] + 1;
+
+				/* is filename in next arg? */
+				if (fin[0] == 0)
+				{
+					i++;
+					fin = cmdtokens[i];
+					c--;
+				}
+				memcpy(cmdtokens+j, cmdtokens+i+1, sizeof(char *) * c-j);
+				c--;
+				i--;
 			}
 		}
 
@@ -1029,6 +1048,8 @@ char **env;
 
 					/* restore terminal */
 					stty(0, &slave_orig_term_settings);
+					
+					/* if command was aborted, stop processing */
 				}
 				else
 				{
