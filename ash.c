@@ -72,6 +72,39 @@ char homeroot[MAXLINELEN];
 
 int runningtask;
 
+void closedown()
+{
+	char filepath[MAXLINELEN];
+	int fd,i;
+
+#ifdef __clang__
+  tcsetattr(0, TCSANOW, &origt);
+#else
+	stty(0, &slave_orig_term_settings);
+#endif
+
+  	if (runningtask)
+  	{
+    		kill(runningtask, SIGKILL);	
+  	}
+
+	for(i=0; i<cmdcount; i++)
+	{
+		kill(cmdpid[i], SIGKILL);
+	}
+
+	strcpy(filepath, getenv("HOME"));
+	strcat(filepath, "/.ash_history");
+	/* printf("closedown: writing to %s\n", filepath); */
+
+	creat(filepath, S_IREAD | S_IWRITE);
+	fd = open(filepath, O_WRONLY);
+	write(fd, history+1, history_len - 1);
+	close(fd);
+
+	exit(0);
+}
+
 void inithistory()
 {
 	char filepath[MAXLINELEN];
@@ -419,7 +452,12 @@ readline()
     fflush(stdout);
 
     lastlen = (int)strlen(line);
-    read(0, &ch, 1);
+    rc = read(0, &ch, 1);
+    if (rc <  0)
+    {
+    	closedown();
+    	done = 1;
+    }
 
 if (ch == 'U' - 64)
 {
@@ -577,38 +615,6 @@ char **args;
 		
 		args++;
 	}
-}
-void closedown()
-{
-	char filepath[MAXLINELEN];
-	int fd,i;
-
-#ifdef __clang__
-  tcsetattr(0, TCSANOW, &origt);
-#else
-	stty(0, &slave_orig_term_settings);
-#endif
-
-  	if (runningtask)
-  	{
-    		kill(runningtask, SIGKILL);	
-  	}
-
-	for(i=0; i<cmdcount; i++)
-	{
-		kill(cmdpid[i], SIGKILL);
-	}
-
-	strcpy(filepath, getenv("HOME"));
-	strcat(filepath, "/.ash_history");
-	/* printf("closedown: writing to %s\n", filepath); */
-
-	creat(filepath, S_IREAD | S_IWRITE);
-	fd = open(filepath, O_WRONLY);
-	write(fd, history+1, history_len - 1);
-	close(fd);
-
-	exit(0);
 }
 
 void sh_exit(sig)
