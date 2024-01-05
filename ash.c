@@ -413,7 +413,7 @@ readline()
   static char line[MAXLINELEN];
   int done = 0;
   int rc,i,lastlen, crp;
-  char ch;
+  char ch, seq[3];
 
   /* CBREAK input */
 #ifdef __clang__
@@ -452,7 +452,7 @@ readline()
     fflush(stdout);
 
     lastlen = (int)strlen(line);
-    rc = read(0, &ch, 1);
+    rc = (int)read(0, &ch, 1);
     if (rc <  0)
     {
     	closedown();
@@ -465,6 +465,36 @@ if (ch == 'U' - 64)
 }
 else
 
+		if (ch == 0x1b)
+		{
+			read(0, seq, 2);
+
+			/* cursor controls from modern terminals */
+			if (seq[0] == 0x5b)
+			{
+					if (seq[1] == 'A')
+					{
+						prevhistory(line);
+						crp = strlen(line);
+					}
+					if (seq[1] == 'B')
+					{
+						nexthistory(line);
+						crp = strlen(line);
+					}
+					if (seq[1] == 'C')
+					{
+						if (line[crp])
+							crp++;
+					}
+					if (seq[1] == 'D')
+					{
+						if (crp > 0)
+							crp--;
+					}
+			}
+		}
+		else
     if (ch == '\n')
     {
       done = 1;
