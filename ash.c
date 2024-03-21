@@ -12,6 +12,12 @@ extern int atoi();
 extern int kill();
 extern char *getenv();
 
+#ifdef __clang__
+#define TARGET_NEWLINE '\n'
+#else
+#define TARGET_NEWLINE '\r'
+#endif
+
 /*
 
 cc -std=c89 ash.c -o ash
@@ -112,7 +118,7 @@ void inithistory()
 	
 	cmdcount = 0;
 	
-	history[0] = '\n';
+	history[0] = TARGET_NEWLINE;
 	history_len = 1;
 	
 	strcpy(filepath, getenv("HOME"));
@@ -137,14 +143,14 @@ char *aline;
 	if (history_len + len > MAXHISTORY)
 	{
 		ptr = history + history_len/2;
-		while(*ptr++ != '\n');
+		while(*ptr++ != TARGET_NEWLINE);
 		memcpy(history+1, ptr, history_len - (ptr-history));
 		history_len -= (ptr-history);
 	}
 
 	memcpy(history+history_len, aline, len);
 	history_len += len;
-	history[history_len++] = '\n';
+	history[history_len++] = TARGET_NEWLINE;
 	history_crp = history_len - 1;
 	
 #if 0
@@ -162,7 +168,7 @@ char *aline;
 	
 	if (history_crp > 0)
 	{
-		while(*--ptr != '\n');
+		while(*--ptr != TARGET_NEWLINE);
 		ptr++;
 		memcpy(aline, ptr, history_crp - (ptr - history));
 		aline[history_crp - (ptr - history)] = '\0';
@@ -177,7 +183,7 @@ char *aline;
 	char *ptr = history+history_crp;
 	if (history_crp < history_len - 1)
 	{
-		while(*ptr++ != '\n');
+		while(*ptr++ != TARGET_NEWLINE);
 		memcpy(aline, ptr+1, (ptr - history) - history_crp);
 		aline[(ptr - history) - history_crp + 1] = '\0';
 		history_crp = ptr - history;
@@ -205,23 +211,23 @@ char *aline;
 		ptr = history;
 		while (hindex-- > 0 && ptr - history + 1 < history_len)
 		{
-			ptr = strchr(ptr, '\n') + 1;
+			ptr = strchr(ptr, TARGET_NEWLINE) + 1;
 		}
 		if (ptr - history + 1 < history_len)
-			memcpy(aline, ptr, strchr(ptr, '\n') - ptr);
+			memcpy(aline, ptr, strchr(ptr, TARGET_NEWLINE) - ptr);
 	}
 	else	/* pattern match */
 	{
 		ptr = history  + history_len - 1;
 		while (ptr > history)
 		{
-			while (*--ptr != '\n');
+			while (*--ptr != TARGET_NEWLINE);
 			if (ptr)
 			{
 				cmd = ptr + 1;
 				if (strstr(cmd, aline+1) == cmd)
 				{
-					memcpy(aline, cmd, strchr(cmd, '\n') - cmd);
+					memcpy(aline, cmd, strchr(cmd, TARGET_NEWLINE) - cmd);
 					break;
 				}
 			}
@@ -400,7 +406,7 @@ int len;
 	char *name;
 	
 	getcwd(pathname, len);
-	name = strrchr(pathname, '\n');
+	name = strrchr(pathname, TARGET_NEWLINE);
 	if (name)
 		*name = '\0';
 
@@ -495,7 +501,7 @@ else
 			}
 		}
 		else
-    if (ch == '\n')
+    if (ch == '\n' || ch == '\r')
     {
       done = 1;
     }
@@ -597,7 +603,7 @@ else
 	stty(0, &slave_orig_term_settings);
 #endif
 
-	putchar('\n');
+	putchar(TARGET_NEWLINE);
 
   return line;
 }
@@ -609,11 +615,11 @@ char *aline;
 	char *token;
 	int c = 0;
 
-	token = strtok(aline, " \n");
+	token = strtok(aline, " \n\r");
 	while(token)
 	{
 		args[c++] = token;
-		token = strtok(NULL, " \n");
+		token = strtok(NULL, " \n\r");
 	}
 	args[c] = NULL;
 
@@ -733,7 +739,7 @@ char **env;
 						{
 								if (i+len < numentries) printf("%-20s", entries[i+len].name);
 						}
-						printf("\n");
+						putchar(TARGET_NEWLINE);
  					}
 
 				}
@@ -747,7 +753,7 @@ char **env;
 		{
 			prettygetcwd(pathname, sizeof(pathname));
 			printf(pathname);
-			putchar('\n');
+			putchar(TARGET_NEWLINE);
 			return 1;
 		}
 		if (!strcmp(args[0], "cd"))
@@ -808,7 +814,7 @@ char **env;
 			while (*env)
 			{
 				printf(*env++);
-				putchar('\n');
+				putchar(TARGET_NEWLINE);
 			}
 			
 			return 1;
@@ -816,10 +822,10 @@ char **env;
 		if (!strcmp(args[0], "jobs"))
 		{
 			if (!cmdcount)
-				printf("No background jobs\n");
+				printf("No background jobs\n\r");
 			for (i=0; i<cmdcount; i++)
 			{
-				printf("[%d] Running %d\n", i+1, cmdpid[i]);
+				printf("[%d] Running %d%c", i+1, cmdpid[i],TARGET_NEWLINE);
 			}
 
 			return 1;
@@ -830,10 +836,10 @@ char **env;
 			i = 0;
 			while(ptr - history < history_len)
 			{
-				name = strchr(ptr, '\n');
+				name = strchr(ptr, TARGET_NEWLINE);
 				memcpy(pathname, ptr, name - ptr);
 				pathname[name - ptr] = '\0';
-				printf("%4d  %s\n", ++i, pathname);
+				printf("%4d  %s\n\r", ++i, pathname);
 				ptr = name + 1;
 			}
 
@@ -848,7 +854,7 @@ char **env;
 				putchar(' ');
 				i++;
 			}
-			putchar('\n');
+			putchar(TARGET_NEWLINE);
 			return 1;
 		}
 		if (!strcmp(args[0], "alias"))
@@ -888,7 +894,7 @@ char **env;
 		}
 		if (!strcmp(args[0], "df"))
 		{
-			args[0] = "free";
+			args[0] = "diskutil";
 			args[1] = "/dev/disk";
 			args[2] = NULL;
 			return 0;
@@ -913,7 +919,7 @@ int sig;
 		{
 			if (cmdpid[i] == pid)
 			{
-				printf("[%d] %d exit\n", i+1, pid);
+				printf("[%d] %d exit\n\r", i+1, pid);
 		
 				cmdpid[i] = cmdpid[cmdcount-1];
 				cmdcount--;
@@ -928,12 +934,18 @@ int sig;
 void sh_int(sig)
 int sig;
 {
+struct sgttyb term_settings;
+
   if (runningtask)
   {
-    kill(runningtask, SIGINT);
- 
-    /* do we need to do this? 'more' just hangs */
-    kill(runningtask, SIGTERM);
+  	gtty(0, &term_settings);
+  	if ((term_settings.sg_flag & RAW) == 0)
+  	{
+			kill(runningtask, SIGINT);
+	 
+			/* do we need to do this? 'more' just hangs */
+			kill(runningtask, SIGTERM);
+		}
   }
   /* re-enable */  
   signal(SIGINT, sh_int);
@@ -1068,7 +1080,7 @@ char **env;
 					result = execvp(filepath, cmdtokens);
 					if (result < 0)
 					{
-						fprintf(stderr, "Error %d on exec\n", errno);
+						fprintf(stderr, "Error %d on exec\n\r", errno);
 					}
 					exit(errno);
 				}
@@ -1090,13 +1102,13 @@ char **env;
 				else
 				{
 					cmdpid[cmdcount++] = runningtask;
-					printf("[%d] %d\n", cmdcount, runningtask);
+					printf("[%d] %d\n\r", cmdcount, runningtask);
 				}
 				runningtask = 0;
 			}
 			else
 			{
-				printf("%s: command not found\n", cmdtokens[0]);
+				printf("%s: command not found\n\r", cmdtokens[0]);
 			}
 		}
 
