@@ -653,10 +653,11 @@ char **args;
 	}
 }
 
-void sh_exit(sig)
+int sh_exit(sig)
 int sig;
 {
 	closedown();
+	return 0;
 }
 
 int cmplsentry(a,b)
@@ -692,6 +693,7 @@ char **env;
 				lsentry *entries;
 				int numentries = 0;
 				int maxentries = 64;
+				int maxwidth = 20;
 				
 				entries = (lsentry *)malloc(sizeof(lsentry) * maxentries);
 				prettygetcwd(pathname, sizeof(pathname));
@@ -702,8 +704,11 @@ char **env;
 				{
 					while ((dir = readdir(d)) != NULL)
 					{
-						strncpy(entries[numentries].name, dir->d_name, sizeof(lsentry)-2);
-						
+						strncpy(entries[numentries].name, dir->d_name, dir->d_namlen);
+						entries[numentries].name[dir->d_namlen] = '\0';
+						if (dir->d_namlen > maxwidth)
+							maxwidth = dir->d_namlen;
+							
 						strcpy(pathname + len, dir->d_name);
 						stat(pathname, &info);
 
@@ -721,17 +726,21 @@ char **env;
 #endif
 
 						numentries++;
-						if (numentries > maxentries)
+						if (numentries >= maxentries)
 						{
 							maxentries *= 2;
 							entries = (lsentry *)realloc(entries, sizeof(lsentry) * maxentries);
+							if (!entries)
+							{
+							  return 0;
+							}
 						}
 					}
 					closedir(d);
 					
 					qsort(entries, numentries, sizeof(lsentry), cmplsentry);
 					
-					/* stride through list */
+					/* stride through list TODO: use maxwidth */
 					j = (numentries+3)/4;
 					for (len=0; len<j; len++)
 					{
@@ -904,7 +913,7 @@ char **env;
 	return 0;
 }
 
-void sh_reap(sig)
+int sh_reap(sig)
 int sig;
 {
 	int result;
@@ -914,7 +923,9 @@ int sig;
 	pid = wait(&result);
 	if (pid > 0)
 	{
-		/* find in cmdpid[] and remove */
+		/* fprintf(stderr, "SIGDEAD %d  => %d\n", pid, result); */
+	
+ 		/* find in cmdpid[] and remove */
 		for(i=0; i<MAXJOBS; i++)
 		{
 			if (cmdpid[i] == pid)
@@ -926,31 +937,53 @@ int sig;
 				break;
 			}
 		}
+		if (runningtask == pid)
+			runningtask = 0;
 	}
 
 	signal(SIGDEAD, sh_reap);
+	
+	return 0;
 }
 
-void sh_int(sig)
+int sh_int(sig)
 int sig;
 {
 struct sgttyb term_settings;
 
   if (runningtask)
   {
+	/* if not RAW mode, forward to child process */
   	gtty(0, &term_settings);
   	if ((term_settings.sg_flag & RAW) == 0)
   	{
-			kill(runningtask, SIGINT);
+		/* fprintf(stderr, "SIGINT %d\n", runningtask); */
+
+		kill(runningtask, SIGINT);
 	 
-			/* do we need to do this? 'more' just hangs */
-			kill(runningtask, SIGTERM);
-		}
+		/* do we need to do this? */
+		/* 'sleep' does not respond top SIGINT.. */
+		kill(runningtask, SIGTERM);
+
+		runningtask = 0;
+
+	}
   }
   /* re-enable */  
   signal(SIGINT, sh_int);
+  
+ return 0;
 }
 
+int sh_handler(sig)
+int sig;
+{
+  fprintf(stderr, "****** signal(%d)\n", sig);
+  
+  signal(sig, sh_handler);
+  
+ return 0;
+}
 
 int do_separators(aline, env)
 char *aline;
@@ -1076,7 +1109,9 @@ char **env;
 						dup2(fd, 0);
 					}
 
+
 					signal(SIGINT, SIG_DFL);
+
 					result = execvp(filepath, cmdtokens);
 					if (result < 0)
 					{
@@ -1087,7 +1122,9 @@ char **env;
 				
 				if (fgtask)
 				{
-					c = wait(&result);
+					c = -1;
+					while(c == -1 && runningtask)
+						c = wait(&result);
 					
 					if (finfd)
 						close(finfd);
