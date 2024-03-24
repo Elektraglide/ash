@@ -39,6 +39,7 @@ TODO:
 #include <sys/ioctl_compat.h>
 #include <sgtty.h>
 struct termios origt,t = {};
+#define sg_flag sg_flags
 
 #define SIGDEAD SIGCHLD
 #define MAXLINELEN 256
@@ -418,7 +419,7 @@ readline()
 {
   static char line[MAXLINELEN];
   int done = 0;
-  int rc,i,lastlen, crp;
+  int rc,i,lastcrp, crp;
   char ch, seq[3];
 
   /* CBREAK input */
@@ -440,24 +441,31 @@ readline()
   /* force visible cursor */
   printf("\033[?25h");
 
+	char *prompt = getenv("PROMPT");
+	if (!prompt)
+		prompt = "\033[7mash++\033[0m";
+		
+	/* TODO: do any substitution in prompt */
+
+	printf("%s ", prompt);
+	
   crp = 0;
   memset(line, 0, sizeof(line));
+  lastcrp = 0;
   while(!done)
   {
-    char *prompt = getenv("PROMPT");
-    if (!prompt)
-      prompt = "\033[7mash++\033[0m";
+		/* NB cursor movement takes value of 0 to mean default of 1 */
+  	if (lastcrp) printf("\033[%dD", lastcrp);
 			
-    /* TODO: do any substitution in prompt */
+				printf("%s\033[K", line);
+				if (strlen(line)) printf("\033[%dD", (int)strlen(line));
 
-    /* ignore ansi escapes */
-    i = countvisible(prompt);
+		if (crp) printf("\033[%dC", crp); fflush(stdout);
 
-    printf("\r%s %s\033[K", prompt, line);
-    printf("\r\033[%dC", (i + 1) + crp); /* NB +1 coz cursorx starts at 1 not 0 */
     fflush(stdout);
 
-    lastlen = (int)strlen(line);
+    lastcrp = crp;
+
     rc = (int)read(0, &ch, 1);
     if (rc <  0)
     {
@@ -467,7 +475,7 @@ readline()
 
 if (ch == 'U' - 64)
 {
-  fprintf(stderr, "\012\n%02x %02x %02x %02x  crp=%d\012\n",line[0],line[1],line[2],line[3],crp);
+  fprintf(stderr, "\012\n%02x %02x %02x %02x  crp=%d len=%d\012\n",line[0],line[1],line[2],line[3],crp,(int)strlen(line));
 }
 else
 
@@ -757,6 +765,28 @@ char **env;
 			
 				return 1;
 			}
+		}
+		if (!strcmp(args[0], "umask") || !strcmp(args[0], "dperm"))
+		{
+			
+			i = umask(31);
+			if (args[1])
+			{
+				i = 0;
+				ptr = args[1];
+				j = *ptr == '0' ? 8 : 10;	/* leading zero indicates octal, else decimal */
+				while (*ptr)
+				{
+					i *= j;
+					i += *ptr++ - '0';
+				}
+			}
+			printf("u-%c%c%c ", (i & 1) ? 'r' : '-', (i & 2) ? 'w' : '-', (i & 4) ? 'x' : '-');
+			printf("o-%c%c%c ", (i & 8) ? 'r' : '-', (i & 16) ? 'w' : '-', (i & 32) ? 'x' : '-');
+			putchar(TARGET_NEWLINE);
+			
+			umask(i);
+			return 1;
 		}
 		if (!strcmp(args[0], "pwd"))
 		{
