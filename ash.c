@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h> 
+#include <varargs.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <sys/signal.h>
@@ -413,6 +414,27 @@ int len;
 
 	return pathname;
 }
+void
+logger(_varargs)
+int _varargs;
+{
+va_list p;
+char buffer[256];
+int c;
+char *fmt;
+int val;
+
+	va_start(p);
+    fmt = va_arg(p, char *);
+    val = va_arg(p, int);
+    
+	sprintf(buffer, fmt, val);	 
+	c = open("/dev/comm", O_RDWR);
+	write(c, buffer, strlen(buffer));
+	close(c);
+
+	va_end(p);
+}
 
 char *
 readline()
@@ -456,13 +478,17 @@ readline()
   lastcrp = 0;
   while(!done)
   {
-		/* NB cursor movement takes value of 0 to mean default of 1 */
-  	if (lastcrp) printf("\033[%dD", lastcrp);
-			
-				printf("%s\033[K", line);
-				if (strlen(line)) printf("\033[%dD", (int)strlen(line));
+logger("lastcrp %d\n\012", lastcrp);
+logger("line %d\n\012", strlen(line)); 
+logger("crp %d\n\012", crp);
 
-		if (crp) printf("\033[%dC", crp);
+	/* NB cursor movement takes value of 0 to mean default of 1 */
+	if (lastcrp) printf("\033[%dD", lastcrp);
+			
+	printf("%s", line);
+	if (strlen(line)) printf("\033[%dD", (int)strlen(line));
+
+	if (crp) printf("\033[%dC", crp);
 
     fflush(stdout);
 
@@ -704,7 +730,9 @@ char **env;
 				int numentries = 0;
 				int maxentries = 64;
 				int maxwidth = 20;
-				
+				int field;
+				char *name;
+								
 				entries = (lsentry *)malloc(sizeof(lsentry) * maxentries);
 				prettygetcwd(pathname, sizeof(pathname));
 				d = opendir(pathname);
@@ -756,7 +784,15 @@ char **env;
 					{
 						for (i=0; i<numentries; i+= j)
 						{
-								if (i+len < numentries) printf("%-20s", entries[i+len].name);
+							if (i+len < numentries) 
+							{
+								name = entries[i+len].name;
+								field = 0;
+								while(name[field] && field < 20)
+								  putchar(name[field++]);
+								while(field++ < 20)
+								  putchar(' ');
+							}
 						}
 						putchar(TARGET_NEWLINE);
  					}
