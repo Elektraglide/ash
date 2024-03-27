@@ -421,7 +421,8 @@ readline()
   int done = 0;
   int rc,i,lastcrp, crp;
   char ch, seq[3];
-
+	char *prompt;
+	
   /* CBREAK input */
 #ifdef __clang__
   /* modern OS no longer support stty as above */
@@ -441,7 +442,8 @@ readline()
   /* force visible cursor */
   printf("\033[?25h");
 
-	char *prompt = getenv("PROMPT");
+	/* default prompt */
+	prompt = getenv("PROMPT");
 	if (!prompt)
 		prompt = "\033[7mash++\033[0m";
 		
@@ -460,7 +462,7 @@ readline()
 				printf("%s\033[K", line);
 				if (strlen(line)) printf("\033[%dD", (int)strlen(line));
 
-		if (crp) printf("\033[%dC", crp); fflush(stdout);
+		if (crp) printf("\033[%dC", crp);
 
     fflush(stdout);
 
