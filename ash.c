@@ -415,20 +415,26 @@ int len;
 	return pathname;
 }
 void
-logger(_varargs)
+loggerf(_varargs)
 int _varargs;
 {
 va_list p;
 char buffer[256];
 int c;
 char *fmt;
-int val;
+unsigned int val1;
+unsigned int val2;
+unsigned int val3;
+unsigned int val4;
 
 	va_start(p);
     fmt = va_arg(p, char *);
-    val = va_arg(p, int);
+    val1 = va_arg(p, unsigned int);
+    val2 = va_arg(p, unsigned int);
+    val3 = va_arg(p, unsigned int);
+    val4 = va_arg(p, unsigned int);
     
-	sprintf(buffer, fmt, val);	 
+	sprintf(buffer, fmt, val1, val2, val3, val4);	 
 	c = open("/dev/comm", O_RDWR);
 	write(c, buffer, strlen(buffer));
 	close(c);
@@ -458,6 +464,7 @@ readline()
   new_term_settings = slave_orig_term_settings;
   new_term_settings.sg_flag |= CBREAK;
   new_term_settings.sg_flag &= ~CRMOD;
+  new_term_settings.sg_flag &= ~ECHO;
   stty(0, &new_term_settings);
 #endif
 
@@ -478,15 +485,14 @@ readline()
   lastcrp = 0;
   while(!done)
   {
-logger("lastcrp %d\n\012", lastcrp);
-logger("line %d\n\012", strlen(line)); 
-logger("crp %d\n\012", crp);
+	/* loggerf("lastcrp %d line %d crp %d\n\012", lastcrp, strlen(line), crp); */
 
 	/* NB cursor movement takes value of 0 to mean default of 1 */
 	if (lastcrp) printf("\033[%dD", lastcrp);
-			
-	printf("%s", line);
-	if (strlen(line)) printf("\033[%dD", (int)strlen(line));
+
+	printf("%s\033[K", line);		
+	if (strlen(line)) 
+		printf("\033[%dD", (int)strlen(line));
 
 	if (crp) printf("\033[%dC", crp);
 
@@ -777,7 +783,7 @@ char **env;
 					closedir(d);
 					
 					qsort(entries, numentries, sizeof(lsentry), cmplsentry);
-					
+
 					/* stride through list TODO: use maxwidth */
 					j = (numentries+3)/4;
 					for (len=0; len<j; len++)
