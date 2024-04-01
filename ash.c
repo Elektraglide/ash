@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h> 
-#include <varargs.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <sys/signal.h>
@@ -17,6 +16,7 @@ extern char *getenv();
 #define TARGET_NEWLINE '\n'
 #else
 #define TARGET_NEWLINE '\r'
+#include <varargs.h>
 #endif
 
 /*
@@ -414,6 +414,12 @@ int len;
 
 	return pathname;
 }
+#ifdef __clang__
+void loggerf(char *fmt, ...)
+{
+
+}
+#else
 void
 loggerf(_varargs)
 int _varargs;
@@ -441,6 +447,7 @@ unsigned int val4;
 
 	va_end(p);
 }
+#endif
 
 char *
 readline()
@@ -474,11 +481,11 @@ readline()
 	/* default prompt */
 	prompt = getenv("PROMPT");
 	if (!prompt)
-		prompt = "\033[7mash++\033[0m";
+		prompt = "\033[7mash++\033[0m ";
 		
 	/* TODO: do any substitution in prompt */
 
-	printf("%s ", prompt);
+	printf("%s", prompt);
 	
   crp = 0;
   memset(line, 0, sizeof(line));
@@ -892,6 +899,20 @@ char **env;
 			}
 			return 1;
 		}
+		if (strstr(args[0], "="))
+		{
+			putenv(args[0]);
+			return 1;
+		}
+		if (args[1] && !strcmp(args[1], "="))
+		{
+			strcpy(pathname, args[0]);
+			strcat(pathname, "=");
+			strcat(pathname, args[2]);
+			putenv(pathname);
+			return 1;
+		}
+		
 		if (!strcmp(args[0], "env") || !strcmp(args[0], "printenv"))
 		{
 			while (*env)
