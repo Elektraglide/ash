@@ -85,6 +85,7 @@ void closedown()
 	char filepath[MAXLINELEN];
 	int fd,i;
 
+
 #ifdef __clang__
   tcsetattr(0, TCSANOW, &origt);
 #else
@@ -763,19 +764,27 @@ char **env;
 						strcpy(pathname + len, dir->d_name);
 						stat(pathname, &info);
 
-						if ((info.st_mode & S_IFDIR) == S_IFDIR)
+						if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
 						{
-							if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
-								strcat(entries[numentries].name, "/");
-						}
+							if ((info.st_mode & S_IFDIR) == S_IFDIR)
+							{
+									strcat(entries[numentries].name, "/");
+							}
 #ifndef __clang__
-						else
-						if (info.st_perm & S_IEXEC)
-						{
-							strcat(entries[numentries].name, "*");
-						}
+							else
+							{
+							if (info.st_perm & S_IEXEC)
+							{
+								strcat(entries[numentries].name, "*");
+							}
+							if (info.st_nlink > 2)
+							{
+								strcat(entries[numentries].name, "@");
+							}
+							}
 #endif
-
+						}
+						
 						numentries++;
 						if (numentries >= maxentries)
 						{
@@ -1008,7 +1017,7 @@ char **env;
 	return 0;
 }
 
-int sh_reap(sig)
+void sh_reap(sig)
 int sig;
 {
 	int result;
@@ -1037,14 +1046,14 @@ int sig;
 	}
 
 	signal(SIGDEAD, sh_reap);
-	
-	return 0;
 }
 
-int sh_int(sig)
+void sh_int(sig)
 int sig;
 {
 struct sgttyb term_settings;
+
+	printf("Interrupted %d\n",sig);
 
   if (runningtask)
   {
@@ -1062,22 +1071,18 @@ struct sgttyb term_settings;
 
 		runningtask = 0;
 
-	}
+    }
   }
-  /* re-enable */  
-  signal(SIGINT, sh_int);
-  
- return 0;
+
+  signal(sig, sh_int);
 }
 
-int sh_handler(sig)
+void sh_handler(sig)
 int sig;
 {
   fprintf(stderr, "****** signal(%d)\n", sig);
   
   signal(sig, sh_handler);
-  
- return 0;
 }
 
 int do_separators(aline, env)
@@ -1204,7 +1209,6 @@ char **env;
 						dup2(fd, 0);
 					}
 
-
 					signal(SIGINT, SIG_DFL);
 
 					result = execvp(filepath, cmdtokens);
@@ -1217,10 +1221,15 @@ char **env;
 				
 				if (fgtask)
 				{
+					/* just while subcommand is running */
+					signal(SIGINT, sh_int);
+
 					c = -1;
 					while(c == -1 && runningtask)
 						c = wait(&result);
 					
+					signal(SIGINT, SIG_IGN);
+
 					if (finfd)
 						close(finfd);
 					if (foutfd)
@@ -1257,9 +1266,10 @@ char **argv;
 char **env;
 {
   char *aline;
-
+	int i;
+	
 	runningtask = 0;
-	signal(SIGINT, sh_int);
+	signal(SIGINT, SIG_IGN);
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
 
@@ -1267,6 +1277,11 @@ char **env;
   gtty(0, &slave_orig_term_settings);
 
 	inithistory();
+
+	/* do we need a default */
+	i = umask(31);
+	if (i == 0)
+		umask(15);
 
 	while(1)
 	{
@@ -1282,3 +1297,4 @@ char **env;
 		}
 	}
 }
+
