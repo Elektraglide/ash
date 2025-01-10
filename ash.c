@@ -44,6 +44,7 @@ struct termios origt,t = {};
 
 #define SIGDEAD SIGCHLD
 #define MAXLINELEN 256
+#define MAX_ENVIRON 8192
 
 #endif
 
@@ -51,6 +52,7 @@ struct termios origt,t = {};
 #include <sys/modes.h>
 #include <sys/sgtty.h>
 #define MAXLINELEN 128
+#define MAX_ENVIRON 1024
 #endif
 
 struct sgttyb slave_orig_term_settings;
@@ -66,6 +68,12 @@ char dstack[MAXPUSH][MAXLINELEN];
 
 /* aliases */
 
+
+/* environ */
+int numenvs = 0;
+char *envptrs[64];
+char envstrings[MAX_ENVIRON];
+
 /* history processing */
 #define MAXHISTORY 1024
 #define MAXJOBS 8
@@ -79,6 +87,132 @@ int history_crp;
 char homeroot[MAXLINELEN];
 
 int runningtask;
+
+/* local qsort */
+
+static int	(*qscmp)();
+static int	qses;
+
+static void qsexc(i, j)
+char *i, *j;
+{
+	register char *ri, *rj, c;
+	int n;
+
+	n = qses;
+	ri = i;
+	rj = j;
+	do {
+		c = *ri;
+		*ri++ = *rj;
+		*rj++ = c;
+	} while(--n);
+}
+
+static void qstexc(i, j, k)
+char *i, *j, *k;
+{
+	register char *ri, *rj, *rk;
+	int c;
+	int n;
+
+	n = qses;
+	ri = i;
+	rj = j;
+	rk = k;
+	do {
+		c = *ri;
+		*ri++ = *rk;
+		*rk++ = *rj;
+		*rj++ = c;
+	} while(--n);
+}
+
+static void qs1(a, l)
+char *a, *l;
+{
+	register char *i, *j;
+	register es;
+	char **k;
+	char *lp, *hp;
+	int c;
+	unsigned n;
+
+
+	es = qses;
+
+start:
+	if((n=l-a) <= es)
+		return;
+	n = es * (n / (2*es));
+	hp = lp = a+n;
+	i = a;
+	j = l-es;
+	for(;;) {
+		if(i < lp) {
+			if((c = (*qscmp)(i, lp)) == 0) {
+				qsexc(i, lp -= es);
+				continue;
+			}
+			if(c < 0) {
+				i += es;
+				continue;
+			}
+		}
+
+loop:
+		if(j > hp) {
+			if((c = (*qscmp)(hp, j)) == 0) {
+				qsexc(hp += es, j);
+				goto loop;
+			}
+			if(c > 0) {
+				if(i == lp) {
+					qstexc(i, hp += es, j);
+					i = lp += es;
+					goto loop;
+				}
+				qsexc(i, j);
+				j -= es;
+				i += es;
+				continue;
+			}
+			j -= es;
+			goto loop;
+		}
+
+
+		if(i == lp) {
+			if(lp-a >= l-hp) {
+				qs1(hp+es, l);
+				l = lp;
+			} else {
+				qs1(a, lp);
+				a = hp+es;
+			}
+			goto start;
+		}
+
+
+		qstexc(j, lp -= es, i);
+		j = hp -= es;
+	}
+}
+
+
+void myqsort(a, n, es, fc)
+char *a;
+unsigned n;
+int es;
+int (*fc)();
+{
+	qscmp = fc;
+	qses = es;
+	qs1(a, a+n*es);
+}
+
+
+
 
 void closedown()
 {
@@ -112,6 +246,71 @@ void closedown()
 	close(fd);
 
 	exit(0);
+}
+
+void initenviron(env)
+char **env;
+{
+  char *crp = envstrings;
+  int len;
+  
+  numenvs = 0;
+  while(*env)
+  {
+    len = strlen(*env);
+    if (len > 0)
+    {
+      envptrs[numenvs++] = crp;
+      strcpy(crp, *env);
+      crp += len;
+      *crp++ = '\0';
+    }
+    
+    env++;
+  }
+}
+
+char **getenviron()
+{
+  return envptrs;
+}
+
+void addenviron(keyval)
+char *keyval;
+{
+  int i;
+  char *key;
+  char *last;
+  
+  key = strchr(keyval, '=');
+  if (key)
+  {
+    /* just key part */
+    *key = 0;
+    
+    last = envstrings;
+    
+    /* replace existing? */
+    for (i=0; i<numenvs; i++)
+    {
+      if (!strncmp(envptrs[i], keyval, key - keyval))
+      {
+        envptrs[i] = envptrs[numenvs-1];
+        i--;
+      }
+
+      /* track last string in our array */
+      if (last < envptrs[i]) last = envptrs[i];
+    }
+    *key = '=';
+
+    /* append to end */
+    last += strlen(last) + 1;
+
+    envptrs[numenvs++] = last;
+    strcpy(last, keyval);
+    
+  }
 }
 
 void inithistory()
@@ -703,11 +902,10 @@ char **args;
 	}
 }
 
-int sh_exit(sig)
+void sh_exit(sig)
 int sig;
 {
 	closedown();
-	return 0;
 }
 
 int cmplsentry(a,b)
@@ -718,6 +916,126 @@ int *b;
 	lsentry *y = (lsentry *)b;
 
 	return strcmp(x->name, y->name);
+}
+
+int do_ls()
+{
+	char pathname[MAXLINELEN];
+	char *name,*ptr;
+	int i,j,len;
+
+  DIR *d;
+  struct direct *dir;
+  struct stat info;
+  lsentry *entries;
+  int numentries = 0;
+  int maxentries = 64;
+  int maxwidth = 20;
+  int field;
+          
+  entries = (lsentry *)malloc(sizeof(lsentry) * maxentries);
+  prettygetcwd(pathname, sizeof(pathname));
+  d = opendir(pathname);
+  strcat(pathname, "/");
+  len = strlen(pathname);
+  if (d)
+  {
+    while ((dir = readdir(d)) != NULL)
+    {
+      strncpy(entries[numentries].name, dir->d_name, dir->d_namlen);
+      entries[numentries].name[dir->d_namlen] = '\0';
+      if (dir->d_namlen > maxwidth)
+        maxwidth = dir->d_namlen;
+        
+      strcpy(pathname + len, dir->d_name);
+      stat(pathname, &info);
+
+      if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
+      {
+        if ((info.st_mode & S_IFDIR) == S_IFDIR)
+        {
+            strcat(entries[numentries].name, "/");
+        }
+#ifndef __clang__
+        else
+        {
+        if (info.st_perm & S_IEXEC)
+        {
+          strcat(entries[numentries].name, "*");
+        }
+        if (info.st_nlink > 2)
+        {
+          strcat(entries[numentries].name, "@");
+        }
+        }
+#endif
+      }
+      
+      numentries++;
+      if (numentries >= maxentries)
+      {
+        maxentries *= 2;
+        entries = (lsentry *)realloc(entries, sizeof(lsentry) * maxentries);
+        if (!entries)
+        {
+          return 0;
+        }
+      }
+    }
+    closedir(d);
+    
+    myqsort(entries, numentries, sizeof(lsentry), cmplsentry);
+
+    /* stride through list TODO: use maxwidth */
+    j = (numentries+3)/4;
+    for (len=0; len<j; len++)
+    {
+      for (i=0; i<numentries; i+= j)
+      {
+        if (i+len < numentries)
+        {
+          name = entries[i+len].name;
+          field = 0;
+          while(name[field] && field < 20)
+            putchar(name[field++]);
+          while(field++ < 20)
+            putchar(' ');
+        }
+      }
+      putchar(TARGET_NEWLINE);
+    }
+
+  }
+
+  free(entries);
+
+  return 1;
+}
+
+int do_umask(arg)
+char *arg;
+{
+register char *ptr;
+int i,j;
+
+  i = umask(31);
+  if (arg)
+  {
+    i = 0;
+    ptr = arg;
+    j = *ptr == '0' ? 8 : 10;	/* leading zero indicates octal, else decimal */
+    while (*ptr)
+    {
+      i *= j;
+      i += *ptr++ - '0';
+    }
+  }
+  printf("u-%c%c%c ", (i & 1) ? 'r' : '-', (i & 2) ? 'w' : '-', (i & 4) ? 'x' : '-');
+  printf("o-%c%c%c ", (i & 8) ? 'r' : '-', (i & 16) ? 'w' : '-', (i & 32) ? 'x' : '-');
+  putchar(TARGET_NEWLINE);
+  
+  umask(i);
+  return 1;
 }
 
 int builtins(args, env)
@@ -737,116 +1055,12 @@ char **env;
 			/* only if its simple column output */
 			if (args[1] == NULL)
 			{
-				DIR *d;
-				struct direct *dir;
-				struct stat info;
-				lsentry *entries;
-				int numentries = 0;
-				int maxentries = 64;
-				int maxwidth = 20;
-				int field;
-				char *name;
-								
-				entries = (lsentry *)malloc(sizeof(lsentry) * maxentries);
-				prettygetcwd(pathname, sizeof(pathname));
-				d = opendir(pathname);
-				strcat(pathname, "/");
-				len = strlen(pathname);
-				if (d)
-				{
-					while ((dir = readdir(d)) != NULL)
-					{
-						strncpy(entries[numentries].name, dir->d_name, dir->d_namlen);
-						entries[numentries].name[dir->d_namlen] = '\0';
-						if (dir->d_namlen > maxwidth)
-							maxwidth = dir->d_namlen;
-							
-						strcpy(pathname + len, dir->d_name);
-						stat(pathname, &info);
-
-						if (strcmp(entries[numentries].name, ".") && strcmp(entries[numentries].name, ".."))
-						{
-							if ((info.st_mode & S_IFDIR) == S_IFDIR)
-							{
-									strcat(entries[numentries].name, "/");
-							}
-#ifndef __clang__
-							else
-							{
-							if (info.st_perm & S_IEXEC)
-							{
-								strcat(entries[numentries].name, "*");
-							}
-							if (info.st_nlink > 2)
-							{
-								strcat(entries[numentries].name, "@");
-							}
-							}
-#endif
-						}
-						
-						numentries++;
-						if (numentries >= maxentries)
-						{
-							maxentries *= 2;
-							entries = (lsentry *)realloc(entries, sizeof(lsentry) * maxentries);
-							if (!entries)
-							{
-							  return 0;
-							}
-						}
-					}
-					closedir(d);
-					
-					qsort(entries, numentries, sizeof(lsentry), cmplsentry);
-
-					/* stride through list TODO: use maxwidth */
-					j = (numentries+3)/4;
-					for (len=0; len<j; len++)
-					{
-						for (i=0; i<numentries; i+= j)
-						{
-							if (i+len < numentries) 
-							{
-								name = entries[i+len].name;
-								field = 0;
-								while(name[field] && field < 20)
-								  putchar(name[field++]);
-								while(field++ < 20)
-								  putchar(' ');
-							}
-						}
-						putchar(TARGET_NEWLINE);
- 					}
-
-				}
-
-				free(entries);
-			
-				return 1;
+				return do_ls();
 			}
 		}
 		if (!strcmp(args[0], "umask") || !strcmp(args[0], "dperm"))
 		{
-			
-			i = umask(31);
-			if (args[1])
-			{
-				i = 0;
-				ptr = args[1];
-				j = *ptr == '0' ? 8 : 10;	/* leading zero indicates octal, else decimal */
-				while (*ptr)
-				{
-					i *= j;
-					i += *ptr++ - '0';
-				}
-			}
-			printf("u-%c%c%c ", (i & 1) ? 'r' : '-', (i & 2) ? 'w' : '-', (i & 4) ? 'x' : '-');
-			printf("o-%c%c%c ", (i & 8) ? 'r' : '-', (i & 16) ? 'w' : '-', (i & 32) ? 'x' : '-');
-			putchar(TARGET_NEWLINE);
-			
-			umask(i);
-			return 1;
+			return do_umask(args[1]);
 		}
 		if (!strcmp(args[0], "pwd"))
 		{
@@ -910,7 +1124,7 @@ char **env;
 		}
 		if (strstr(args[0], "="))
 		{
-			putenv(args[0]);
+			addenviron(args[0]);
 			return 1;
 		}
 		if (args[1] && !strcmp(args[1], "="))
@@ -918,7 +1132,7 @@ char **env;
 			strcpy(pathname, args[0]);
 			strcat(pathname, "=");
 			strcat(pathname, args[2]);
-			putenv(pathname);
+			addenviron(pathname);
 			return 1;
 		}
 		
@@ -952,7 +1166,7 @@ char **env;
 				name = strchr(ptr, TARGET_NEWLINE);
 				memcpy(pathname, ptr, name - ptr);
 				pathname[name - ptr] = '\0';
-				printf("%4d  %s\n\r", ++i, pathname);
+				printf("%4d  %s\n", ++i, pathname);
 				ptr = name + 1;
 			}
 
@@ -1277,11 +1491,8 @@ char **env;
   gtty(0, &slave_orig_term_settings);
 
 	inithistory();
-
-	/* do we need a default */
-	i = umask(31);
-	if (i == 0)
-		umask(15);
+ 
+  initenviron(env);
 
 	while(1)
 	{
@@ -1292,7 +1503,7 @@ char **env;
 		
 			addhistory(aline);
 
-			do_separators(aline, env);
+			do_separators(aline, getenviron());
 
 		}
 	}
