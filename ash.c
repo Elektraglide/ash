@@ -87,131 +87,7 @@ int history_crp;
 char homeroot[MAXLINELEN];
 
 int runningtask;
-
-/* local qsort */
-
-static int	(*qscmp)();
-static int	qses;
-
-static void qsexc(i, j)
-char *i, *j;
-{
-	register char *ri, *rj, c;
-	int n;
-
-	n = qses;
-	ri = i;
-	rj = j;
-	do {
-		c = *ri;
-		*ri++ = *rj;
-		*rj++ = c;
-	} while(--n);
-}
-
-static void qstexc(i, j, k)
-char *i, *j, *k;
-{
-	register char *ri, *rj, *rk;
-	int c;
-	int n;
-
-	n = qses;
-	ri = i;
-	rj = j;
-	rk = k;
-	do {
-		c = *ri;
-		*ri++ = *rk;
-		*rk++ = *rj;
-		*rj++ = c;
-	} while(--n);
-}
-
-static void qs1(a, l)
-char *a, *l;
-{
-	register char *i, *j;
-	register es;
-	char **k;
-	char *lp, *hp;
-	int c;
-	unsigned n;
-
-
-	es = qses;
-
-start:
-	if((n=l-a) <= es)
-		return;
-	n = es * (n / (2*es));
-	hp = lp = a+n;
-	i = a;
-	j = l-es;
-	for(;;) {
-		if(i < lp) {
-			if((c = (*qscmp)(i, lp)) == 0) {
-				qsexc(i, lp -= es);
-				continue;
-			}
-			if(c < 0) {
-				i += es;
-				continue;
-			}
-		}
-
-loop:
-		if(j > hp) {
-			if((c = (*qscmp)(hp, j)) == 0) {
-				qsexc(hp += es, j);
-				goto loop;
-			}
-			if(c > 0) {
-				if(i == lp) {
-					qstexc(i, hp += es, j);
-					i = lp += es;
-					goto loop;
-				}
-				qsexc(i, j);
-				j -= es;
-				i += es;
-				continue;
-			}
-			j -= es;
-			goto loop;
-		}
-
-
-		if(i == lp) {
-			if(lp-a >= l-hp) {
-				qs1(hp+es, l);
-				l = lp;
-			} else {
-				qs1(a, lp);
-				a = hp+es;
-			}
-			goto start;
-		}
-
-
-		qstexc(j, lp -= es, i);
-		j = hp -= es;
-	}
-}
-
-
-void myqsort(a, n, es, fc)
-char *a;
-unsigned n;
-int es;
-int (*fc)();
-{
-	qscmp = fc;
-	qses = es;
-	qs1(a, a+n*es);
-}
-
-
+int runningsig;
 
 
 void closedown()
@@ -278,7 +154,7 @@ char **getenviron()
 void addenviron(keyval)
 char *keyval;
 {
-  int i;
+  int i,j;
   char *key;
   char *last;
   
@@ -295,7 +171,9 @@ char *keyval;
     {
       if (!strncmp(envptrs[i], keyval, key - keyval))
       {
-        envptrs[i] = envptrs[numenvs-1];
+        /* swap last item with item to be updated */
+        numenvs--;
+        envptrs[i] = envptrs[numenvs];
         i--;
       }
 
@@ -304,11 +182,25 @@ char *keyval;
     }
     *key = '=';
 
-    /* append to end */
+    /* append to end (and not recovering memory for old value yet) */
     last += strlen(last) + 1;
 
     envptrs[numenvs++] = last;
     strcpy(last, keyval);
+    
+    /* compact it all to recover memory */
+    last = envstrings;
+    for (i=0; i<numenvs; i++)
+    {
+      char *keyval2 = envptrs[i];
+      envptrs[i] = last;
+      
+      /* NB dst may overlap src */
+      while(*keyval2)
+        *last++ = *keyval2++;
+      *last++ = '\0';
+    }
+    
     
   }
 }
@@ -947,6 +839,7 @@ int do_ls()
       if (dir->d_namlen > maxwidth)
         maxwidth = dir->d_namlen;
         
+#ifdef USE_SLOW_STATING_EVERY_FILE
       strcpy(pathname + len, dir->d_name);
       stat(pathname, &info);
 
@@ -970,7 +863,8 @@ int do_ls()
         }
 #endif
       }
-      
+#endif
+
       numentries++;
       if (numentries >= maxentries)
       {
@@ -984,7 +878,7 @@ int do_ls()
     }
     closedir(d);
     
-    myqsort(entries, numentries, sizeof(lsentry), cmplsentry);
+    qsort(entries, numentries, sizeof(lsentry), cmplsentry);
 
     /* stride through list TODO: use maxwidth */
     j = (numentries+3)/4;
@@ -1241,7 +1135,7 @@ int sig;
 	pid = wait(&result);
 	if (pid > 0)
 	{
-		/* fprintf(stderr, "SIGDEAD %d  => %d\n", pid, result); */
+		fprintf(stderr, "SIGDEAD %d  => %d\n", pid, result);
 	
  		/* find in cmdpid[] and remove */
 		for(i=0; i<MAXJOBS; i++)
@@ -1262,7 +1156,7 @@ int sig;
 	signal(SIGDEAD, sh_reap);
 }
 
-void sh_int(sig)
+void sh_int_forwarding(sig)
 int sig;
 {
 struct sgttyb term_settings;
@@ -1274,21 +1168,18 @@ struct sgttyb term_settings;
 	/* if not RAW mode, forward to child process */
   	gtty(0, &term_settings);
   	if ((term_settings.sg_flag & RAW) == 0)
-  	{
-		/* fprintf(stderr, "SIGINT %d\n", runningtask); */
+    {
+      /* fprintf(stderr, "signal%d to %d\n", runningsig,runningtask); */
 
-		kill(runningtask, SIGINT);
-	 
-		/* do we need to do this? */
-		/* 'sleep' does not respond top SIGINT.. */
-		kill(runningtask, SIGTERM);
-
-		runningtask = 0;
-
+      kill(runningtask, runningsig);
+     
+      /* do we need to do this? */
+      /* 'sleep' does not respond top SIGINT.. */
+      runningsig = SIGTERM;
     }
   }
 
-  signal(sig, sh_int);
+  signal(sig, sh_int_forwarding);
 }
 
 void sh_handler(sig)
@@ -1307,7 +1198,7 @@ char **env;
   char *cmdtokens[64];
   char *fin, *fout;
   int  finfd, foutfd;
-  int fd,i,j,c,fgtask,nctask,result;
+  int fd,i,j,c,bgtask,nctask,result;
 	char *phrase,*phraseend;
 
 	phrase = aline;
@@ -1377,8 +1268,8 @@ char **env;
 		}
 
 		/* is background job */
-		fgtask = (cmdtokens[c-1][0] != '&');
-		if (!fgtask)
+		bgtask = (cmdtokens[c-1][0] == '&');
+		if (bgtask)
 		{
 			cmdtokens[--c] = NULL;
 		}
@@ -1401,8 +1292,9 @@ char **env;
 					creat(fout, S_IREAD | S_IWRITE);
 					foutfd = open(fout, O_WRONLY);
 				}
-					
-				runningtask = fork();
+
+				runningsig = SIGINT;  /* first time SIGINT, then SIGTERM */
+				runningtask = vfork();
 				if (runningtask == 0)
 				{
 					if (nctask)
@@ -1416,7 +1308,8 @@ char **env;
 					if (foutfd > 0)
 						dup2(foutfd, 1);
 
-					if (!fgtask && !finfd)
+					/* background and using stdin */
+					if (bgtask && !finfd)
 					{
 						/* force stdin to be /dev/null */
 						fd = open("/dev/null", O_RDONLY);
@@ -1433,15 +1326,24 @@ char **env;
 					exit(errno);
 				}
 				
-				if (fgtask)
+				if (bgtask)
+				{
+					cmdpid[cmdcount++] = runningtask;
+					printf("[%d] %d\n\r", cmdcount, runningtask);
+				}
+				else
 				{
 					/* just while subcommand is running */
-					signal(SIGINT, sh_int);
+					signal(SIGINT, sh_int_forwarding);
 
-					c = -1;
+					/* wait for child process to complete (will call sh_reap) */
+          c = -1;
 					while(c == -1 && runningtask)
-						c = wait(&result);
-					
+					{
+              /* busy busy busy */
+              c = wait(&result);
+					}
+
 					signal(SIGINT, SIG_IGN);
 
 					if (finfd)
@@ -1454,11 +1356,7 @@ char **env;
 					
 					/* if command was aborted, stop processing */
 				}
-				else
-				{
-					cmdpid[cmdcount++] = runningtask;
-					printf("[%d] %d\n\r", cmdcount, runningtask);
-				}
+
 				runningtask = 0;
 			}
 			else
