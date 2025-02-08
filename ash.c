@@ -1043,7 +1043,7 @@ char **env;
 		if (!strcmp(args[0], "jobs"))
 		{
 			if (!cmdcount)
-				printf("No background jobs\n\r");
+				printf("No background jobs\n");
 			for (i=0; i<cmdcount; i++)
 			{
 				printf("[%d] Running %d%c", i+1, cmdpid[i],TARGET_NEWLINE);
@@ -1135,14 +1135,14 @@ int sig;
 	pid = wait(&result);
 	if (pid > 0)
 	{
-		fprintf(stderr, "SIGDEAD %d  => %d\n", pid, result);
+	    printf("SIGDEAD %d => %d\n", pid, result);
 	
  		/* find in cmdpid[] and remove */
 		for(i=0; i<MAXJOBS; i++)
 		{
 			if (cmdpid[i] == pid)
 			{
-				printf("[%d] %d exit\n\r", i+1, pid);
+				printf("\n[%d] %d exit\n", i+1, pid);
 		
 				cmdpid[i] = cmdpid[cmdcount-1];
 				cmdcount--;
@@ -1150,7 +1150,10 @@ int sig;
 			}
 		}
 		if (runningtask == pid)
+		{
+			printf("runningtask(%d) now zero\n",runningtask);
 			runningtask = 0;
+	    }
 	}
 
 	signal(SIGDEAD, sh_reap);
@@ -1161,15 +1164,13 @@ int sig;
 {
 struct sgttyb term_settings;
 
-	printf("Interrupted %d\n",sig);
-
   if (runningtask)
   {
 	/* if not RAW mode, forward to child process */
   	gtty(0, &term_settings);
   	if ((term_settings.sg_flag & RAW) == 0)
     {
-      /* fprintf(stderr, "signal%d to %d\n", runningsig,runningtask); */
+      printf("proc(%d) forwarding Interrupt %d to proc(%d)\n",getpid(), sig, runningtask);
 
       kill(runningtask, runningsig);
      
@@ -1329,19 +1330,22 @@ char **env;
 				if (bgtask)
 				{
 					cmdpid[cmdcount++] = runningtask;
-					printf("[%d] %d\n\r", cmdcount, runningtask);
+					printf("[%d] %d\012\n", cmdcount, runningtask);
 				}
 				else
 				{
 					/* just while subcommand is running */
+/*
 					signal(SIGINT, sh_int_forwarding);
+	*/
 
 					/* wait for child process to complete (will call sh_reap) */
-          c = -1;
+                    c = -1;
 					while(c == -1 && runningtask)
 					{
-              /* busy busy busy */
-              c = wait(&result);
+                      /* busy busy busy */
+                      c = wait(&result);
+                      printf("wait => %d\n", c);
 					}
 
 					signal(SIGINT, SIG_IGN);
