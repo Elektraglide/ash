@@ -114,7 +114,7 @@ void closedown()
 
 	strcpy(filepath, getenv("HOME"));
 	strcat(filepath, "/.ash_history");
-	/* printf("closedown: writing to %s\n", filepath); */
+    /* printf("closedown: writing to %s\n", filepath);  */
 
 	creat(filepath, S_IREAD | S_IWRITE);
 	fd = open(filepath, O_WRONLY);
@@ -473,7 +473,7 @@ char *pwd;
 			memcpy(pathname+1, pathname+strlen(home), strlen(pathname));
 		}
 	
-    printf(pathname);
+        printf(pathname);
 		putchar(' ');
 	}
 
@@ -487,7 +487,7 @@ char *pwd;
 			memcpy(pathname+1, pathname+strlen(home), strlen(pathname));
 		}
 	
-    printf(pathname);
+        printf(pathname);
 		putchar(' ');
   }
 		putchar('\n');
@@ -602,8 +602,13 @@ readline()
     rc = (int)read(0, &ch, 1);
     if (rc <  0)
     {
-    	closedown();
-    	done = 1;
+    	if (errno != EINTR)
+    	{
+      	  closedown();
+    	  done = 1;
+    	}
+
+    	continue;
     }
 
 if (ch == 'U' - 64)
@@ -642,10 +647,10 @@ else
 			}
 		}
 		else
-    if (ch == '\n' || ch == '\r')
-    {
-      done = 1;
-    }
+        if (ch == '\n' || ch == '\r')
+        {
+          done = 1;
+        }
 		else
 		if (ch == 'A' - 64)
 		{
@@ -1135,14 +1140,14 @@ int sig;
 	pid = wait(&result);
 	if (pid > 0)
 	{
-	    printf("SIGDEAD %d => %d\n", pid, result);
-	
+	     /* printf("SIGDEAD %d => %d\n", pid, result); */
+
  		/* find in cmdpid[] and remove */
 		for(i=0; i<MAXJOBS; i++)
 		{
 			if (cmdpid[i] == pid)
 			{
-				printf("\n[%d] %d exit\n", i+1, pid);
+				printf("[%d] %d exit\n", i+1, pid);
 		
 				cmdpid[i] = cmdpid[cmdcount-1];
 				cmdcount--;
@@ -1151,9 +1156,14 @@ int sig;
 		}
 		if (runningtask == pid)
 		{
-			printf("runningtask(%d) now zero\n",runningtask);
+			if (result)
+ 	          printf("Interrupted\n");
 			runningtask = 0;
 	    }
+	}
+	else
+	{
+	 /* fprintf(stderr, "sh_reap: wait failed: %s\n", strerror(errno));	*/
 	}
 
 	signal(SIGDEAD, sh_reap);
@@ -1330,14 +1340,14 @@ char **env;
 				if (bgtask)
 				{
 					cmdpid[cmdcount++] = runningtask;
-					printf("[%d] %d\012\n", cmdcount, runningtask);
+					printf("[%d] %d\n", cmdcount, runningtask);
 				}
 				else
 				{
 					/* just while subcommand is running */
 /*
 					signal(SIGINT, sh_int_forwarding);
-	*/
+*/
 
 					/* wait for child process to complete (will call sh_reap) */
                     c = -1;
@@ -1345,7 +1355,6 @@ char **env;
 					{
                       /* busy busy busy */
                       c = wait(&result);
-                      printf("wait => %d\n", c);
 					}
 
 					signal(SIGINT, SIG_IGN);
