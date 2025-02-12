@@ -56,6 +56,7 @@ struct termios origt,t = {};
 #endif
 
 struct sgttyb slave_orig_term_settings;
+int redrawprompt;
 
 typedef struct {
 	char name[20];
@@ -577,13 +578,20 @@ readline()
 		
 	/* TODO: do any substitution in prompt */
 
-	printf("%s", prompt);
-	
+  redrawprompt = 1;
+  
   crp = 0;
   memset(line, 0, sizeof(line));
   lastcrp = 0;
   while(!done)
   {
+    /* this allows external to force a redraw */
+    if (redrawprompt)
+    {
+    	printf("%s", prompt);
+      redrawprompt = 0;
+    }
+  
 	/* loggerf("lastcrp %d line %d crp %d\n\012", lastcrp, strlen(line), crp); */
 
 	/* NB cursor movement takes value of 0 to mean default of 1 */
@@ -1148,6 +1156,7 @@ int sig;
 			if (cmdpid[i] == pid)
 			{
 				printf("\012\n[%d] %d exit\012\n", i+1, pid);
+				redrawprompt = 1;
 		
 				cmdpid[i] = cmdpid[cmdcount-1];
 				cmdcount--;
