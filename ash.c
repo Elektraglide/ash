@@ -1147,7 +1147,7 @@ int sig;
 		{
 			if (cmdpid[i] == pid)
 			{
-				printf("[%d] %d exit\n", i+1, pid);
+				printf("\012\n[%d] %d exit\012\n", i+1, pid);
 		
 				cmdpid[i] = cmdpid[cmdcount-1];
 				cmdcount--;
@@ -1174,16 +1174,15 @@ int sig;
 {
 struct sgttyb term_settings;
 
-  if (runningtask)
+  /* if not RAW mode, forward to child process */
+  gtty(0, &term_settings);
+  if ((term_settings.sg_flag & RAW) == 0)
   {
-	/* if not RAW mode, forward to child process */
-  	gtty(0, &term_settings);
-  	if ((term_settings.sg_flag & RAW) == 0)
+    if (runningtask)
     {
+      kill(runningtask, runningsig);
       printf("proc(%d) forwarding Interrupt %d to proc(%d)\n",getpid(), sig, runningtask);
 
-      kill(runningtask, runningsig);
-     
       /* do we need to do this? */
       /* 'sleep' does not respond top SIGINT.. */
       runningsig = SIGTERM;
@@ -1345,9 +1344,9 @@ char **env;
 				else
 				{
 					/* just while subcommand is running */
-/*
+
 					signal(SIGINT, sh_int_forwarding);
-*/
+
 
 					/* wait for child process to complete (will call sh_reap) */
                     c = -1;
