@@ -1375,6 +1375,11 @@ char **env;
 					/* restore terminal */
 					stty(0, &slave_orig_term_settings);
 					
+#ifndef __clang__
+					/* need to restore Event system too */
+					EventDisable();
+#endif
+
 					/* if command was aborted, stop processing */
 				}
 
