@@ -1191,10 +1191,6 @@ struct sgttyb term_settings;
     {
       kill(runningtask, runningsig);
       printf("proc(%d) forwarding Interrupt %d to proc(%d)\n",getpid(), sig, runningtask);
-
-      /* do we need to do this? */
-      /* 'sleep' does not respond top SIGINT.. */
-      runningsig = SIGTERM;
     }
   }
 
@@ -1312,7 +1308,7 @@ char **env;
 					foutfd = open(fout, O_WRONLY);
 				}
 
-				runningsig = SIGINT;  /* first time SIGINT, then SIGTERM */
+				runningsig = SIGINT;  /* signal to forward to child */
 				runningtask = vfork();
 				if (runningtask == 0)
 				{
