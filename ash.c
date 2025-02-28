@@ -1291,8 +1291,26 @@ char **env;
 		
 		if (!builtins(cmdtokens, env))
 		{
+			struct stat info;
+			int isexecutable;
+			int isfound;
+
 			strcpy(filepath, cmdtokens[0]);
-			if (cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/' || whereis(filepath, cmdtokens[0]))
+			isfound = whereis(filepath, cmdtokens[0]);
+
+			/* is it executable */
+			isexecutable = 0;
+			stat(filepath, &info);
+			if ((info.st_mode & S_IFDIR) != S_IFDIR)
+			{
+				if (info.st_perm & S_IEXEC)
+				{
+					isexecutable = 1;
+				}
+			}
+
+			/* executable and found in path */
+			if (isexecutable && (isfound || cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/'))
 			{
 				/* redirect stdio */
 				finfd = 0;
@@ -1349,9 +1367,7 @@ char **env;
 				else
 				{
 					/* just while subcommand is running */
-
 					signal(SIGINT, sh_int_forwarding);
-
 
 					/* wait for child process to complete (will call sh_reap) */
                     c = -1;
@@ -1407,12 +1423,20 @@ char **env;
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
 
-  /* initial terminal settings */
-  gtty(0, &slave_orig_term_settings);
+	/* badly behaved progs */
+	signal(SIGDIV, sh_reap);
+	signal(SIGPRIV, sh_reap);
+	signal(SIGADDR, sh_reap);
+	signal(SIGWRIT, sh_reap);
+	signal(SIGEXEC, sh_reap);
+	signal(SIGBND, sh_reap);
+
+	/* initial terminal settings */
+	gtty(0, &slave_orig_term_settings);
 
 	inithistory();
  
-  initenviron(env);
+	initenviron(env);
 
 	while(1)
 	{
