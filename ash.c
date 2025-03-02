@@ -88,7 +88,6 @@ int history_crp;
 char homeroot[MAXLINELEN];
 
 int runningtask;
-int runningsig;
 
 
 void closedown()
@@ -399,7 +398,36 @@ char *partial;
   return(0);
 }
 
+void waittask()
+{
+	int i, c, result;
 
+	c = wait(&result);
+	if (c >= 0)
+	{
+		/* why did it stop? */
+		for (i = 0; i < MAXJOBS; i++)
+		{
+			if (cmdpid[i] == c)
+			{
+				printf("\012\n[%d] %d exit(%d)\012\n", i + 1, c, result);
+				redrawprompt = 1;
+
+				cmdpid[i] = cmdpid[cmdcount - 1];
+				cmdcount--;
+				break;
+			}
+		}
+		if (runningtask == c)
+		{
+			if (result)
+				printf("Interrupted\n");
+			runningtask = 0;
+		}
+	}
+}
+
+/* resolve path and check its executable */
 int whereis(filepath, cmd)
 char *filepath;
 char *cmd;
@@ -407,12 +435,29 @@ char *cmd;
   struct stat info;
   char *apath,*search;
   char workingsearch[1024];
+
+  /* absolute path */
+  if (cmd[0] == '/' || cmd[0] == '.')
+  {
+    strcpy(filepath, cmd);	
+    if (stat(filepath, &info) == 0)
+    {
+		if ((info.st_mode & S_IFDIR) != S_IFDIR)
+		{
+			if (info.st_perm & S_IEXEC)
+			{
+				return 1;
+			}
+		}
+    }
+    return 0;
+  }
   
   search = getenv("PATH");
-	if (!search)
-			search = "/bin:.";
+  if (!search)
+	search = "/bin:.";
 	
-	strcpy(workingsearch,search);
+  strcpy(workingsearch,search);
   apath = strtok(workingsearch, ":");
   while (apath)
   {
@@ -422,13 +467,19 @@ char *cmd;
       	
     if (stat(filepath, &info) == 0)
     {
-			return 1;
+		if ((info.st_mode & S_IFDIR) != S_IFDIR)
+		{
+			if (info.st_perm & S_IEXEC)
+			{
+				return 1;
+			}
+		}
     }
 
     apath = strtok(NULL,  ":");
   }
 
-	return 0;
+  return 0;
 }
 
 int countvisible(str)
@@ -616,6 +667,7 @@ readline()
     	  done = 1;
     	}
 
+		waittask();
     	continue;
     }
 
@@ -1141,41 +1193,8 @@ char **env;
 void sh_reap(sig)
 int sig;
 {
-	int result;
-	int pid;
-	int i;
-	
-	pid = wait(&result);
-	if (pid > 0)
-	{
-	     /* printf("SIGDEAD %d => %d\n", pid, result); */
 
- 		/* find in cmdpid[] and remove */
-		for(i=0; i<MAXJOBS; i++)
-		{
-			if (cmdpid[i] == pid)
-			{
-				printf("\012\n[%d] %d exit\012\n", i+1, pid);
-				redrawprompt = 1;
-		
-				cmdpid[i] = cmdpid[cmdcount-1];
-				cmdcount--;
-				break;
-			}
-		}
-		if (runningtask == pid)
-		{
-			if (result)
- 	          printf("Interrupted\n");
-			runningtask = 0;
-	    }
-	}
-	else
-	{
-	 /* fprintf(stderr, "sh_reap: wait failed: %s\n", strerror(errno));	*/
-	}
-
-	signal(SIGDEAD, sh_reap);
+	signal(sig, sh_reap);
 }
 
 void sh_int_forwarding(sig)
@@ -1189,7 +1208,7 @@ struct sgttyb term_settings;
   {
     if (runningtask)
     {
-      kill(runningtask, runningsig);
+      kill(runningtask, sig);
       printf("proc(%d) forwarding Interrupt %d to proc(%d)\n",getpid(), sig, runningtask);
     }
   }
@@ -1291,26 +1310,8 @@ char **env;
 		
 		if (!builtins(cmdtokens, env))
 		{
-			struct stat info;
-			int isexecutable;
-			int isfound;
-
-			strcpy(filepath, cmdtokens[0]);
-			isfound = whereis(filepath, cmdtokens[0]);
-
-			/* is it executable */
-			isexecutable = 0;
-			stat(filepath, &info);
-			if ((info.st_mode & S_IFDIR) != S_IFDIR)
-			{
-				if (info.st_perm & S_IEXEC)
-				{
-					isexecutable = 1;
-				}
-			}
-
 			/* executable and found in path */
-			if (isexecutable && (isfound || cmdtokens[0][0] == '.' || cmdtokens[0][0] == '/'))
+			if (whereis(filepath, cmdtokens[0]))
 			{
 				/* redirect stdio */
 				finfd = 0;
@@ -1326,7 +1327,6 @@ char **env;
 					foutfd = open(fout, O_WRONLY);
 				}
 
-				runningsig = SIGINT;  /* signal to forward to child */
 				runningtask = vfork();
 				if (runningtask == 0)
 				{
@@ -1368,16 +1368,18 @@ char **env;
 				{
 					/* just while subcommand is running */
 					signal(SIGINT, sh_int_forwarding);
+					signal(SIGQUIT, sh_int_forwarding);
 
 					/* wait for child process to complete (will call sh_reap) */
-                    c = -1;
-					while(c == -1 && runningtask)
+					while(runningtask)
 					{
-                      /* busy busy busy */
-                      c = wait(&result);
+						/* busy busy busy */
+						waittask();
 					}
 
+
 					signal(SIGINT, SIG_IGN);
+					signal(SIGQUIT, SIG_IGN);
 
 					if (finfd)
 						close(finfd);
@@ -1389,7 +1391,7 @@ char **env;
 					
 #ifndef __clang__
 					/* need to restore Event system too */
-					EventDisable();
+					/* EventDisable();  */
 #endif
 
 					/* if command was aborted, stop processing */
@@ -1423,6 +1425,7 @@ char **env;
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
 
+#if 1
 	/* badly behaved progs */
 	signal(SIGDIV, sh_reap);
 	signal(SIGPRIV, sh_reap);
@@ -1430,6 +1433,7 @@ char **env;
 	signal(SIGWRIT, sh_reap);
 	signal(SIGEXEC, sh_reap);
 	signal(SIGBND, sh_reap);
+#endif
 
 	/* initial terminal settings */
 	gtty(0, &slave_orig_term_settings);
