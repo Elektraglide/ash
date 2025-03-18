@@ -89,6 +89,7 @@ char homeroot[MAXLINELEN];
 
 int runningtask;
 
+FILE *source;
 
 void closedown()
 {
@@ -601,6 +602,19 @@ readline()
   int rc,i,lastcrp, crp;
   char ch, seq[3];
 	char *prompt;
+	
+	if (source)
+	{
+		if (fgets(line, sizeof(line), source))
+		{
+			return line;
+		}
+		else
+		{
+			fclose(source);
+			source = NULL;
+		}
+	}
 	
   /* CBREAK input */
 #ifdef __clang__
@@ -1417,6 +1431,7 @@ int argc;
 char **argv;
 char **env;
 {
+	char filepath[MAXLINELEN];
   char *aline;
 	int i;
 	
@@ -1441,6 +1456,10 @@ char **env;
 	inithistory();
  
 	initenviron(env);
+
+	strcpy(filepath, getenv("HOME"));
+	strcat(filepath, "/.login");
+	source = fopen(filepath, "r");
 
 	while(1)
 	{
