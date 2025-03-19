@@ -601,6 +601,7 @@ readline()
   int done = 0;
   int rc,i,lastcrp, crp;
   char ch, seq[3];
+  struct sgttyb new_term_settings;
 	char *prompt;
 	
 	if (source)
@@ -613,6 +614,8 @@ readline()
 		{
 			fclose(source);
 			source = NULL;
+			line[0] = '\0';
+			return line;
 		}
 	}
 	
@@ -625,7 +628,6 @@ readline()
   
   tcsetattr(0, TCSANOW, &t);
 #else
-  struct sgttyb new_term_settings;
   new_term_settings = slave_orig_term_settings;
   new_term_settings.sg_flag |= CBREAK;
   new_term_settings.sg_flag &= ~CRMOD;
@@ -1458,7 +1460,7 @@ char **env;
 	initenviron(env);
 
 	strcpy(filepath, getenv("HOME"));
-	strcat(filepath, "/.login");
+	strcat(filepath, "/.ashrc");
 	source = fopen(filepath, "r");
 
 	while(1)
