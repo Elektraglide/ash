@@ -14,6 +14,8 @@ extern char *getenv();
 
 #ifdef __clang__
 #define TARGET_NEWLINE '\n'
+#define st_perm st_mode
+#define S_IEXEC S_IXUSR
 #else
 #define TARGET_NEWLINE '\r'
 #include <varargs.h>
@@ -158,7 +160,8 @@ char *keyval;
   int i,j;
   char *key;
   char *last;
-  
+  char *value,*tmp;
+    
   key = strchr(keyval, '=');
   if (key)
   {
@@ -181,13 +184,25 @@ char *keyval;
       /* track last string in our array */
       if (last < envptrs[i]) last = envptrs[i];
     }
-    *key = '=';
 
     /* append to end (and not recovering memory for old value yet) */
     last += strlen(last) + 1;
 
+    /* strip quotes if neccessary */
+    value = key + 1;
+    tmp = strchr(value, '\"');
+    if (tmp)
+    {
+      value = tmp + 1;
+      tmp = strchr(value, '\"');
+      if (tmp)
+        *tmp = 0;
+    }
+
     envptrs[numenvs++] = last;
     strcpy(last, keyval);
+    strcat(last, "=");
+    strcat(last, value);
     
     /* compact it all to recover memory */
     last = envstrings;
@@ -1159,6 +1174,11 @@ char **env;
 			putchar(TARGET_NEWLINE);
 			return 1;
 		}
+		if (!strcmp(args[0], "source"))
+		{
+			if (source) fclose(source);
+			source = fopen(args[1], "r");
+		}
 		if (!strcmp(args[0], "alias"))
 		{
 			return 1;
@@ -1262,7 +1282,8 @@ char **env;
 		}
 	
 		c = tokenize(cmdtokens, phrase);
-
+    if (c < 1) return 0;
+    
 		/* wildcard expansion */
 
 		var_substitutions(cmdtokens);
@@ -1367,7 +1388,7 @@ char **env;
 
 					signal(SIGINT, SIG_DFL);
 
-					result = execvp(filepath, cmdtokens);
+					result = execvp(filepath, cmdtokens, env);
 					if (result < 0)
 					{
 						fprintf(stderr, "Error %d on exec\n\r", errno);
@@ -1442,7 +1463,7 @@ char **env;
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
 
-#if 1
+#ifndef __clang__
 	/* badly behaved progs */
 	signal(SIGDIV, sh_reap);
 	signal(SIGPRIV, sh_reap);
