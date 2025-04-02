@@ -161,6 +161,7 @@ char *keyval;
   char *key;
   char *last;
   char *value,*tmp;
+  char *compacted;
     
   key = strchr(keyval, '=');
   if (key)
@@ -205,19 +206,19 @@ char *keyval;
     strcat(last, value);
     
     /* compact it all to recover memory */
+    
+    compacted = tmp = malloc(MAX_ENVIRON);
     last = envstrings;
     for (i=0; i<numenvs; i++)
     {
       char *keyval2 = envptrs[i];
-      envptrs[i] = last;
-      
-      /* NB dst may overlap src */
-      while(*keyval2)
-        *last++ = *keyval2++;
-      *last++ = '\0';
-    }
-    
-    
+      envptrs[i] = envstrings + (tmp - compacted);
+
+			strcpy(tmp, keyval2);
+			tmp += strlen(keyval2) + 1;
+		}
+		memcpy(envstrings, compacted, MAX_ENVIRON);
+		free(compacted);    
   }
 }
 
@@ -1388,7 +1389,7 @@ char **env;
 
 					signal(SIGINT, SIG_DFL);
 
-					result = execvp(filepath, cmdtokens, env);
+					result = execve(filepath, cmdtokens, env);
 					if (result < 0)
 					{
 						fprintf(stderr, "Error %d on exec\n\r", errno);
@@ -1491,7 +1492,8 @@ char **env;
 		{
 			history_substitutions(aline);
 		
-			addhistory(aline);
+			if (!source)
+				addhistory(aline);
 
 			do_separators(aline, getenviron());
 
