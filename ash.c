@@ -1179,6 +1179,7 @@ char **env;
 		{
 			if (source) fclose(source);
 			source = fopen(args[1], "r");
+			return 1;
 		}
 		if (!strcmp(args[0], "alias"))
 		{
