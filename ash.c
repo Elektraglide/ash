@@ -73,6 +73,7 @@ char dstack[MAXPUSH][MAXLINELEN];
 
 
 /* environ */
+char **origenv;
 int numenvs = 0;
 char *envptrs[64];
 char envstrings[MAX_ENVIRON];
@@ -133,6 +134,9 @@ char **env;
   char *crp = envstrings;
   int len;
   
+  /* to pass into children */
+  origenv = env;
+  
   numenvs = 0;
   while(*env)
   {
@@ -182,7 +186,7 @@ char *keyval;
         i--;
       }
 
-      /* track last string in our array */
+       /* track high watermark string in our array */
       if (last < envptrs[i]) last = envptrs[i];
     }
 
@@ -200,25 +204,38 @@ char *keyval;
         *tmp = 0;
     }
 
-    envptrs[numenvs++] = last;
+		/* copy in new env string */
+    envptrs[numenvs] = last;
     strcpy(last, keyval);
     strcat(last, "=");
     strcat(last, value);
-    
-    /* compact it all to recover memory */
-    
-    compacted = tmp = malloc(MAX_ENVIRON);
-    last = envstrings;
-    for (i=0; i<numenvs; i++)
-    {
-      char *keyval2 = envptrs[i];
-      envptrs[i] = envstrings + (tmp - compacted);
 
-			strcpy(tmp, keyval2);
-			tmp += strlen(keyval2) + 1;
+		/* update env */
+ 		putenv(envptrs[numenvs]);
+ 		numenvs++;
+
+    /* compact it all to recover memory */
+    if ((last - envstrings) > (MAX_ENVIRON * 3) / 4)
+    {
+			compacted = tmp = malloc(MAX_ENVIRON);
+			last = envstrings;
+			for (i=0; i<numenvs; i++)
+			{
+				char *keyval2 = envptrs[i];
+				envptrs[i] = envstrings + (tmp - compacted);
+
+				strcpy(tmp, keyval2);
+				tmp += strlen(keyval2) + 1;
+			}
+			memcpy(envstrings, compacted, MAX_ENVIRON);
+			free(compacted);
+			envptrs[i] = NULL;
+
+			for (i=0; i<numenvs; i++)
+			{
+				putenv(envptrs[i]);
+			}
 		}
-		memcpy(envstrings, compacted, MAX_ENVIRON);
-		free(compacted);    
   }
 }
 
@@ -850,17 +867,53 @@ int tokenize(args, aline)
 char **args;
 char *aline;
 {
-	char *token;
-	int c = 0;
+	char *token,*sep,*quote = 0;
+	short c = 0;
+	short quoted = 0;
 
-	token = strtok(aline, " \n\r");
-	while(token)
+	/* break into words (and treat quoted phrases as a single word) */
+	token = aline;
+	while(*token)
 	{
-		args[c++] = token;
-		token = strtok(NULL, " \n\r");
-	}
-	args[c] = NULL;
+		/* potential token seperator */
+		sep = strchr(token, ' ');
+		if (!sep) sep = strchr(token, '\n');
+		if (!sep) sep = strchr(token, '\r');
+		if (!sep) sep = token + strlen(token);
+			
+		quote = strchr(token, '\"');
+		if (quote && (quote < sep || sep == NULL))
+		{
+			/* find closing */
+			quote = strchr(quote + 1, '\"');
+			if (quote)
+				quote++;
+		}
+		else
+			quote = NULL;
 
+		if (sep)
+		{
+			if (sep < quote)
+			{
+				sep = quote;
+				quote = NULL;
+			}
+			if (token < sep)
+			{
+				*sep = '\0';
+				args[c++] = token;
+			}
+			token = sep + 1;
+		}
+	}
+	
+	if (c == 0)
+		args[c++] = aline;
+
+	/* terminate list */
+	args[c] = NULL;
+	
 	return c;
 }
 
