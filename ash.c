@@ -10,7 +10,6 @@
 extern void exit();
 extern int atoi();
 extern int kill();
-extern char *getenv();
 
 #ifdef __clang__
 #define TARGET_NEWLINE '\n'
@@ -116,7 +115,7 @@ void closedown()
 		kill(cmdpid[i], SIGKILL);
 	}
 
-	strcpy(filepath, getenv("HOME"));
+	strcpy(filepath, getenviron("HOME"));
 	strcat(filepath, "/.ash_history");
     /* printf("closedown: writing to %s\n", filepath);  */
 
@@ -153,7 +152,34 @@ char **env;
   }
 }
 
-char **getenviron()
+char* getenviron(key)
+char* key;
+{
+	static char result[MAXLINELEN];
+	register short i,j;
+
+	for (i = 0; i < numenvs; i++)
+	{
+		char* testkey;
+		
+		testkey = envptrs[i];
+		for (j = 0; j < 32; j++)
+		{
+			if (testkey[j] != key[j] && testkey[j] != '=')
+				break;
+
+			if (testkey[j] == '=' && key[j] == '\0')
+			{
+				strcpy(result, testkey + j + 1);
+				return result;
+			}
+		}
+	}
+
+	return NULL;
+}
+
+char **getenvironarr()
 {
   return envptrs;
 }
@@ -249,7 +275,7 @@ void inithistory()
 	history[0] = TARGET_NEWLINE;
 	history_len = 1;
 	
-	strcpy(filepath, getenv("HOME"));
+	strcpy(filepath, getenviron("HOME"));
 	strcat(filepath, "/.ash_history");
 
 	fd = open(filepath, O_RDONLY);
@@ -405,7 +431,7 @@ char *partial;
 	strcpy(pathname, partial);
 	if (partial[0] == '~')
 	{
-		strcpy(pathname, getenv("HOME"));
+		strcpy(pathname, getenviron("HOME"));
 		strcat(pathname, partial+1);
 	}
 	
@@ -487,7 +513,7 @@ char *cmd;
     return 0;
   }
   
-  search = getenv("PATH");
+  search = getenviron("PATH");
   if (!search)
 	search = "/bin:.";
 	
@@ -549,7 +575,7 @@ char *pwd;
   char *home;
   char pathname[512];
   
-	home = getenv("HOME");
+	home = getenviron("HOME");
   if (pwd)
   {
 		strcpy(pathname, pwd);
@@ -672,7 +698,7 @@ readline()
   printf("\033[?25h");
 
 	/* default prompt */
-	prompt = getenv("PROMPT");
+	prompt = getenviron("PROMPT");
 	if (!prompt)
 		prompt = "\033[7mash++\033[0m ";
 		
@@ -926,7 +952,7 @@ char **args;
 	{
 		if (*args[0] == '$')
 		{
-			name = getenv((*args)+1);
+			name = getenviron((*args)+1);
 			if (name)
 				*args = name;
 		}
@@ -934,7 +960,7 @@ char **args;
 		if (*args[0] == '~')
 		{
 			name = *args;
-			strcpy(homeroot, getenv("HOME"));
+			strcpy(homeroot, getenviron("HOME"));
 			strcat(homeroot, name+1);
 			
 			*args = homeroot;
@@ -1117,7 +1143,7 @@ char **env;
 		{
 			name = args[1];
 			if (!name)
-				name = getenv("HOME");
+				name = getenviron("HOME");
 			if (chdir(name) < 0)
 			{
 				printf("cd: %s: no such directory\n", name);
@@ -1531,11 +1557,12 @@ char **env;
 	/* initial terminal settings */
 	gtty(0, &slave_orig_term_settings);
 
-	inithistory();
- 
+	/* setup early */
 	initenviron(env);
 
-	strcpy(filepath, getenv("HOME"));
+	inithistory();
+ 
+	strcpy(filepath, getenviron("HOME"));
 	strcat(filepath, "/.ashrc");
 	source = fopen(filepath, "r");
 
@@ -1549,7 +1576,7 @@ char **env;
 			if (!source)
 				addhistory(aline);
 
-			do_separators(aline, getenviron());
+			do_separators(aline, getenvironarr());
 
 		}
 	}
