@@ -204,7 +204,9 @@ char *keyval;
     /* replace existing? */
     for (i=0; i<numenvs; i++)
     {
-      if (!strncmp(envptrs[i], keyval, key - keyval))
+      short n = key - keyval;
+      
+      if (envptrs[i][n] == '=' && !strncmp(envptrs[i], keyval, n))
       {
         /* swap last item with item to be updated */
         numenvs--;
@@ -237,7 +239,6 @@ char *keyval;
     strcat(last, value);
 
 		/* update env */
- 		putenv(envptrs[numenvs]);
  		numenvs++;
 
     /* compact it all to recover memory */
@@ -256,11 +257,6 @@ char *keyval;
 			memcpy(envstrings, compacted, MAX_ENVIRON);
 			free(compacted);
 			envptrs[i] = NULL;
-
-			for (i=0; i<numenvs; i++)
-			{
-				putenv(envptrs[i]);
-			}
 		}
   }
 }
