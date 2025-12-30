@@ -76,6 +76,9 @@ char **origenv;
 int numenvs = 0;
 char *envptrs[64];
 char envstrings[MAX_ENVIRON];
+void initenviron()
+char* getenviron();
+void addenviron();
 
 /* history processing */
 #define MAXHISTORY 1024
