@@ -11,7 +11,7 @@ extern void exit();
 extern int atoi();
 extern int kill();
 
-#ifdef __clang__
+#ifndef TEK4404
 #define TARGET_NEWLINE '\n'
 #define st_perm st_mode
 #define S_IEXEC S_IXUSR
@@ -33,7 +33,7 @@ TODO:
 
 */
 
-#ifdef __clang__
+#ifndef TEK4404
 #include <stdlib.h>
 #include <sys/termios.h>
 #include <sys/wait.h>
@@ -41,7 +41,6 @@ TODO:
 #include <sys/ioctl_compat.h>
 #include <sgtty.h>
 struct termios origt,t = {};
-#define sg_flag sg_flags
 
 #define SIGDEAD SIGCHLD
 #define MAXLINELEN 256
@@ -49,11 +48,12 @@ struct termios origt,t = {};
 
 #endif
 
-#ifndef __clang__
+#ifdef TEK4404
 #include <sys/modes.h>
 #include <sys/sgtty.h>
 #define MAXLINELEN 128
 #define MAX_ENVIRON 1024
+#define sg_flags sg_flag	/* Uniflex */
 #endif
 
 struct sgttyb slave_orig_term_settings;
@@ -102,7 +102,7 @@ void closedown()
 	int fd,i;
 
 
-#ifdef __clang__
+#ifndef TEK4404
   tcsetattr(0, TCSANOW, &origt);
 #else
 	stty(0, &slave_orig_term_settings);
@@ -617,7 +617,7 @@ int len;
 
 	return pathname;
 }
-#ifdef __clang__
+#ifndef TEK4404
 void loggerf(char *fmt, ...)
 {
 
@@ -678,7 +678,7 @@ readline()
 	}
 	
   /* CBREAK input */
-#ifdef __clang__
+#ifndef TEK4404
   /* modern OS no longer support stty as above */
   tcgetattr(0, &t);
   origt = t;
@@ -687,9 +687,9 @@ readline()
   tcsetattr(0, TCSANOW, &t);
 #else
   new_term_settings = slave_orig_term_settings;
-  new_term_settings.sg_flag |= CBREAK;
-  new_term_settings.sg_flag &= ~CRMOD;
-  new_term_settings.sg_flag &= ~ECHO;
+  new_term_settings.sg_flags |= CBREAK;
+  new_term_settings.sg_flags &= ~CRMOD;
+  new_term_settings.sg_flags &= ~ECHO;
   stty(0, &new_term_settings);
 #endif
 
@@ -877,7 +877,7 @@ else
  		}
   }
 
-#ifdef __clang__
+#ifndef TEK4404
   tcsetattr(0, TCSANOW, &origt);
 #else
 	stty(0, &slave_orig_term_settings);
@@ -1024,7 +1024,7 @@ int do_ls()
         {
             strcat(entries[numentries].name, "/");
         }
-#ifndef __clang__
+#ifdef TEK4404
         else
         {
         if (info.st_perm & S_IEXEC)
@@ -1320,7 +1320,7 @@ struct sgttyb term_settings;
 
   /* if not RAW mode, forward to child process */
   gtty(0, &term_settings);
-  if ((term_settings.sg_flag & RAW) == 0)
+  if ((term_settings.sg_flags & RAW) == 0)
   {
     if (runningtask)
     {
@@ -1506,7 +1506,7 @@ char **env;
 					/* restore terminal */
 					stty(0, &slave_orig_term_settings);
 					
-#ifndef __clang__
+#ifdef TEK4404
 					/* need to restore Event system too */
 					/* EventDisable();  */
 #endif
@@ -1543,7 +1543,7 @@ char **env;
 	signal(SIGTERM, sh_exit);
 	signal(SIGDEAD, sh_reap);
 
-#ifndef __clang__
+#ifdef TEK4404
 	/* badly behaved progs */
 	signal(SIGDIV, sh_reap);
 	signal(SIGPRIV, sh_reap);
