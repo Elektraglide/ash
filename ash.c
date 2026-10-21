@@ -6,6 +6,7 @@
 #include <sys/signal.h>
 
 #include <sys/dir.h>
+#include <varargs.h>
 
 extern void exit();
 extern int atoi();
@@ -17,7 +18,6 @@ extern int kill();
 #define S_IEXEC S_IXUSR
 #else
 #define TARGET_NEWLINE '\r'
-#include <varargs.h>
 #endif
 
 /*
@@ -33,28 +33,33 @@ TODO:
 
 */
 
-#ifndef TEK4404
-#include <stdlib.h>
-#include <sys/termios.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <sys/ioctl_compat.h>
-#include <sgtty.h>
-struct termios origt,t = {};
-
-#define SIGDEAD SIGCHLD
-#define MAXLINELEN 256
-#define MAX_ENVIRON 8192
-
-#endif
-
 #ifdef TEK4404
 #include <sys/modes.h>
 #include <sys/sgtty.h>
 #define MAXLINELEN 128
 #define MAX_ENVIRON 1024
 #define sg_flags sg_flag	/* Uniflex */
+
+#define USE_STTY
+
+#else
+
+#include <sys/termios.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#ifndef USE_STTY
+#include <stdlib.h>
+#include <sys/ioctl_compat.h>
 #endif
+#include <sgtty.h>
+
+struct termios origt,t;
+#define SIGDEAD SIGCHLD
+#define MAXLINELEN 256
+#define MAX_ENVIRON 8192
+
+#endif
+
 
 struct sgttyb slave_orig_term_settings;
 int redrawprompt;
@@ -102,10 +107,10 @@ void closedown()
 	int fd,i;
 
 
-#ifndef TEK4404
-  tcsetattr(0, TCSANOW, &origt);
-#else
+#ifdef USE_STTY
 	stty(0, &slave_orig_term_settings);
+#else
+	tcsetattr(0, TCSANOW, &origt);
 #endif
 
   	if (runningtask)
@@ -247,7 +252,7 @@ char *keyval;
     /* compact it all to recover memory */
     if ((last - envstrings) > (MAX_ENVIRON * 3) / 4)
     {
-			compacted = tmp = malloc(MAX_ENVIRON);
+			compacted = tmp = (char *)malloc(MAX_ENVIRON);
 			last = envstrings;
 			for (i=0; i<numenvs; i++)
 			{
@@ -617,7 +622,8 @@ int len;
 
 	return pathname;
 }
-#ifndef TEK4404
+
+#ifndef USE_STTY
 void loggerf(char *fmt, ...)
 {
 
@@ -627,6 +633,7 @@ void
 loggerf(_varargs)
 int _varargs;
 {
+#if 0
 va_list p;
 char buffer[256];
 int c;
@@ -649,6 +656,7 @@ unsigned int val4;
 	close(c);
 
 	va_end(p);
+#endif	
 }
 #endif
 
@@ -678,19 +686,19 @@ readline()
 	}
 	
   /* CBREAK input */
-#ifndef TEK4404
+#ifdef USE_STTY
+  new_term_settings = slave_orig_term_settings;
+  new_term_settings.sg_flags |= CBREAK;
+  new_term_settings.sg_flags &= ~CRMOD;
+  new_term_settings.sg_flags &= ~ECHO;
+  stty(0, &new_term_settings);
+#else
   /* modern OS no longer support stty as above */
   tcgetattr(0, &t);
   origt = t;
   t.c_lflag &= ~(ICANON | ISIG | IEXTEN | ECHO);
   
   tcsetattr(0, TCSANOW, &t);
-#else
-  new_term_settings = slave_orig_term_settings;
-  new_term_settings.sg_flags |= CBREAK;
-  new_term_settings.sg_flags &= ~CRMOD;
-  new_term_settings.sg_flags &= ~ECHO;
-  stty(0, &new_term_settings);
 #endif
 
   /* force visible cursor */
@@ -877,10 +885,11 @@ else
  		}
   }
 
-#ifndef TEK4404
-  tcsetattr(0, TCSANOW, &origt);
-#else
+
+#ifdef USE_STTY
 	stty(0, &slave_orig_term_settings);
+#else
+	tcsetattr(0, TCSANOW, &origt);
 #endif
 
 	putchar(TARGET_NEWLINE);
@@ -1276,6 +1285,7 @@ char **env;
 			return 1;
 		}
 		
+#ifdef TEK4404
 		/* fake alias */
 		if (!strcmp(args[0], "ps"))
 		{
@@ -1301,7 +1311,7 @@ char **env;
 			args[2] = NULL;
 			return 0;
 		}
-		
+#endif		
 
 	return 0;
 }
@@ -1503,9 +1513,13 @@ char **env;
 					if (foutfd)
 						close(foutfd);
 
+
+#ifdef USE_STTY
 					/* restore terminal */
 					stty(0, &slave_orig_term_settings);
+#endif
 					
+
 #ifdef TEK4404
 					/* need to restore Event system too */
 					/* EventDisable();  */
