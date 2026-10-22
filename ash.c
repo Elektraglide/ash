@@ -179,7 +179,7 @@ char* key;
 
 			if (testkey[j] == '=' && key[j] == '\0')
 			{
-				strcpy(result, testkey + j + 1);
+				strncpy(result, testkey + j + 1, MAXLINELEN);
 				return result;
 			}
 		}
