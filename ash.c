@@ -6,7 +6,6 @@
 #include <sys/signal.h>
 
 #include <sys/dir.h>
-#include <varargs.h>
 
 extern void exit();
 extern int atoi();
@@ -72,6 +71,8 @@ typedef struct {
 #define MAXPUSH 8
 int dstacktop = 0;
 char dstack[MAXPUSH][MAXLINELEN];
+
+#define MAXARGS 256
 
 /* aliases */
 
@@ -951,6 +952,174 @@ char *aline;
 	return c;
 }
 
+int expand(pattern, expansion)
+char *pattern;
+char *expansion;
+{
+	char pathname[MAXLINELEN];
+  char prepath[MAXLINELEN];
+	char *name,*ptr;
+	int i,j,len;
+
+  DIR *d;
+  struct direct *dir;
+  int count;
+  
+  prettygetcwd(pathname, sizeof(pathname));
+  prepath[0] = '\0';
+
+  /* if its a path, add it */
+  ptr = strrchr(pattern, '/');
+  if (ptr)
+  {
+    /* keep prepath to append to expansions */
+    len = 0;
+    name = pattern;
+    while(name < ptr)
+      prepath[len++] = *name++;
+    prepath[len++] = '\0';
+    
+    /* absolute path */
+    if (pattern[0] == '/')
+    {
+      strcpy(pathname, prepath);
+    }
+    else
+    {
+      strcat(pathname, "/");
+      strcat(pathname, prepath);
+    }
+
+    pattern = ptr + 1;
+  }
+  
+  count = 0;
+  d = opendir(pathname);
+  if (d)
+  {
+    while ((dir = readdir(d)) != NULL)
+    {
+      if (dir->d_name[0] == '.' && dir->d_name[1] == '\0')
+        continue;
+      if (dir->d_name[0] == '.' && dir->d_name[1] == '.')
+        continue;
+        
+      i = 0;
+      j = 0;
+      while(i < dir->d_namlen && pattern[j] && pattern[j] != '\0')
+      {
+        if (pattern[j] == dir->d_name[i])
+        {
+          j++;
+        }
+        else
+        if (pattern[j] == '?')
+        {
+          j++;
+        }
+        else
+        if (pattern[j] == '*' && (pattern[j+1] == dir->d_name[i]))
+        {
+          j++; j++;
+        }
+        else
+        if (pattern[j] == '*')
+        {
+          /* consume */
+        }
+        else
+        {
+          /* mismatch */
+          j = -1;
+          break;
+        }
+
+        i++;
+      }
+
+      /* it has been used */
+      if (pattern[j] == '*')
+        j++;
+      
+      if (j == strlen(pattern) && i == dir->d_namlen)
+      {
+        if (prepath[0])
+        {
+          strcpy(expansion, prepath);
+          strcat(expansion, "/");
+        }
+        strcat(expansion, dir->d_name);
+        expansion += strlen(expansion) + 1;
+        *expansion = '\0';
+        count++;
+      }
+    }
+    closedir(d);
+  }
+  
+  return count;
+}
+
+int wildcard_substitutions(args)
+char **args;
+{
+	static char expansion[MAXLINELEN * 2];
+	char *name;
+  int count,i,remain;
+  int argcount = 0;
+  
+	while(*args && argcount < MAXARGS)
+	{
+    /* is it a pattern? */
+    if (strchr(*args, '?') || strchr(*args,'*'))
+    {
+      expansion[0] = '\0';
+      count = expand(*args, expansion);
+
+      if (count)
+      {
+        /* how many originals left do we need to shuffle up */
+        remain = 0;
+        while (args[remain])
+          remain++;
+        
+        if ((remain + count) > MAXARGS)
+          break;
+
+        /* shuffle up 'remain' items to make 'count' slots */
+        do
+        {
+          args[remain + count - 1] = args[remain];
+        } while(--remain > 0);
+
+        /* insert */
+        i = 0;
+        name = expansion;
+        while(*name)
+        {
+          args[i++] = name;
+          name += strlen(name) + 1;
+        }
+        i--;
+        
+        args += i;
+        argcount += i;
+      }
+      else
+      {
+        /* blank it out */
+        args[0][0] = 0;
+        break;
+      }
+    }
+
+    args++;
+    argcount++;
+  }
+  
+  return argcount;
+}
+
 void var_substitutions(args)
 char **args;
 {
@@ -1355,7 +1524,7 @@ char *aline;
 char **env;
 {
   char filepath[MAXLINELEN];
-  char *cmdtokens[64];
+  char *cmdtokens[MAXARGS];
   char *fin, *fout;
   int  finfd, foutfd;
   int fd,i,j,c,bgtask,nctask,result;
@@ -1374,7 +1543,7 @@ char **env;
 		c = tokenize(cmdtokens, phrase);
     if (c < 1) return 0;
     
-		/* wildcard expansion */
+    c = wildcard_substitutions(cmdtokens);
 
 		var_substitutions(cmdtokens);
 		
