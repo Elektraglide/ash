@@ -63,8 +63,9 @@ struct termios origt,t;
 struct sgttyb slave_orig_term_settings;
 int redrawprompt;
 
+#define LSNAMELEN 20
 typedef struct {
-	char name[20];
+	char name[LSNAMELEN];
 } lsentry;
 
 /* pushd/pop dir */
@@ -1187,7 +1188,7 @@ int do_ls()
   {
     while ((dir = readdir(d)) != NULL)
     {
-      strncpy(entries[numentries].name, dir->d_name, dir->d_namlen);
+      strncpy(entries[numentries].name, dir->d_name, sizeof(entries[0].name));
       entries[numentries].name[dir->d_namlen] = '\0';
       if (dir->d_namlen > maxwidth)
         maxwidth = dir->d_namlen;
