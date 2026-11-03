@@ -135,27 +135,29 @@ void closedown()
 }
 
 void initenviron(env)
-char **env;
+char *env[];
 {
   char *crp = envstrings;
-  int len;
+  int len,i;
   
   /* to pass into children */
   origenv = env;
   
+  i = 0;
   numenvs = 0;
-  while(*env)
+  while(env[i])
   {
-    len = strlen(*env);
+    len = strlen(env[i]);
     if (len > 0)
     {
+      strcpy(crp, env[i]);
       envptrs[numenvs++] = crp;
-      strcpy(crp, *env);
+      
       crp += len;
       *crp++ = '\0';
     }
-    
-    env++;
+
+    i++;
   }
 }
 
@@ -463,7 +465,7 @@ char *partial;
 
 void waittask()
 {
-	int i, c, result;
+	int i, c, result = 0;
 
 	c = wait(&result);
 	if (c >= 0)
@@ -483,8 +485,10 @@ void waittask()
 		}
 		if (runningtask == c)
 		{
+#if 0
 			if (result)
-				printf("Interrupted\n");
+				printf("Interrupted %d\n", result);
+#endif
 			runningtask = 0;
 		}
 	}
