@@ -11,14 +11,6 @@ extern void exit();
 extern int atoi();
 extern int kill();
 
-#ifndef TEK4404
-#define TARGET_NEWLINE '\n'
-#define st_perm st_mode
-#define S_IEXEC S_IXUSR
-#else
-#define TARGET_NEWLINE '\r'
-#endif
-
 /*
 
 cc -std=c89 ash.c -o ash
@@ -40,6 +32,7 @@ TODO:
 #define sg_flags sg_flag	/* Uniflex */
 
 #define USE_STTY
+#define TARGET_NEWLINE '\r'
 
 #else
 
@@ -54,8 +47,12 @@ TODO:
 
 struct termios origt,t;
 #define SIGDEAD SIGCHLD
-#define MAXLINELEN 256
+#define MAXLINELEN 1024
 #define MAX_ENVIRON 8192
+
+#define TARGET_NEWLINE '\n'
+#define st_perm st_mode
+#define S_IEXEC S_IXUSR
 
 #endif
 
