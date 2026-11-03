@@ -501,12 +501,12 @@ char *cmd;
 {
   struct stat info;
   char *apath,*search;
-  char workingsearch[1024];
+  char workingsearch[MAX_ENVIRON];
 
   /* absolute path */
   if (cmd[0] == '/' || cmd[0] == '.')
   {
-    strcpy(filepath, cmd);	
+    strcpy(filepath, cmd);
     if (stat(filepath, &info) == 0)
     {
 		if ((info.st_mode & S_IFDIR) != S_IFDIR)
@@ -531,7 +531,6 @@ char *cmd;
     strcpy(filepath, apath);
     strcat(filepath, "/");
     strcat(filepath, cmd);
-      	
     if (stat(filepath, &info) == 0)
     {
 		if ((info.st_mode & S_IFDIR) != S_IFDIR)
@@ -575,8 +574,9 @@ char *str;
 	return count;
 }
 
-void printdstack(pwd)
+void printdstack(pwd, output)
 char *pwd;
+FILE *output;
 {
   int i;
   char *home;
@@ -592,8 +592,8 @@ char *pwd;
 			memcpy(pathname+1, pathname+strlen(home), strlen(pathname));
 		}
 	
-        printf(pathname);
-		putchar(' ');
+		fprintf(output, pathname);
+		putc(' ', output);
 	}
 
   i = dstacktop;
@@ -606,10 +606,12 @@ char *pwd;
 			memcpy(pathname+1, pathname+strlen(home), strlen(pathname));
 		}
 	
-        printf(pathname);
-		putchar(' ');
+		fprintf(output, pathname);
+		putc(' ', output);
   }
-		putchar('\n');
+
+	putc('\n', output);
+
 }
 
 char *prettygetcwd(pathname, len)
@@ -1131,6 +1133,7 @@ char **args;
 	{
 		if (*args[0] == '$')
 		{
+      /* FIXME: this is a static buffer, so will be overwritten */
 			name = getenviron((*args)+1);
 			if (name)
 				*args = name;
@@ -1287,9 +1290,10 @@ int i,j;
   return 1;
 }
 
-int builtins(args, env)
+int builtins(args, env, output)
 char **args;
 char **env;
+FILE *output;
 {
 	char pathname[MAXLINELEN];
 	char *name,*ptr;
@@ -1314,8 +1318,8 @@ char **env;
 		if (!strcmp(args[0], "pwd"))
 		{
 			prettygetcwd(pathname, sizeof(pathname));
-			printf(pathname);
-			putchar(TARGET_NEWLINE);
+			fprintf(output, pathname);
+			putc(TARGET_NEWLINE, output);
 			return 1;
 		}
 		if (!strcmp(args[0], "cd"))
@@ -1325,7 +1329,7 @@ char **env;
 				name = getenviron("HOME");
 			if (chdir(name) < 0)
 			{
-				printf("cd: %s: no such directory\n", name);
+				fprintf(output, "cd: %s: no such directory\n", name);
 			}
 			else
 			{
@@ -1340,7 +1344,7 @@ char **env;
 		if (!strcmp(args[0], "dirs"))
 		{
 				prettygetcwd(pathname, sizeof(pathname));
-				printdstack(pathname);
+				printdstack(pathname, output);
 				return 1;
 		}
 		if (!strcmp(args[0], "pushd"))
@@ -1350,11 +1354,11 @@ char **env;
 				prettygetcwd(dstack[dstacktop], sizeof(dstack[0]));
 				if (chdir(args[1]) < 0)
 				{
-					printf("pushd: %s: no such directory\n", args[1]);
+					fprintf(output, "pushd: %s: no such directory\n", args[1]);
 				}
 				dstacktop++;
 				prettygetcwd(pathname, sizeof(pathname));
-				printdstack(pathname);
+				printdstack(pathname, output);
 			}
 			return 1;
 		}
@@ -1362,11 +1366,11 @@ char **env;
 		{
 			if (dstacktop > 0)
 			{
-				printdstack(NULL);
+				printdstack(NULL, output);
 				dstacktop--;
 				if (chdir(dstack[dstacktop]) < 0)
 				{
-					printf("popd: %s: no such directory\n", dstack[dstacktop]);
+					fprintf(output, "popd: %s: no such directory\n", dstack[dstacktop]);
 				}
 			}
 			return 1;
@@ -1389,8 +1393,8 @@ char **env;
 		{
 			while (*env)
 			{
-				printf(*env++);
-				putchar(TARGET_NEWLINE);
+				fprintf(output, *env++);
+				putc(TARGET_NEWLINE, output);
 			}
 			
 			return 1;
@@ -1398,10 +1402,10 @@ char **env;
 		if (!strcmp(args[0], "jobs"))
 		{
 			if (!cmdcount)
-				printf("No background jobs\n");
+				fprintf(output,"No background jobs\n");
 			for (i=0; i<cmdcount; i++)
 			{
-				printf("[%d] Running %d%c", i+1, cmdpid[i],TARGET_NEWLINE);
+				fprintf(output, "[%d] Running %d%c", i+1, cmdpid[i],TARGET_NEWLINE);
 			}
 
 			return 1;
@@ -1415,7 +1419,7 @@ char **env;
 				name = strchr(ptr, TARGET_NEWLINE);
 				memcpy(pathname, ptr, name - ptr);
 				pathname[name - ptr] = '\0';
-				printf("%4d  %s\n", ++i, pathname);
+				fprintf(output, "%4d  %s\n", ++i, pathname);
 				ptr = name + 1;
 			}
 
@@ -1426,11 +1430,11 @@ char **env;
 			i = 1;
 			while(args[i])
 			{
-				printf(args[i]);
-				putchar(' ');
+				fprintf(output, args[i]);
+				putc(' ', output);
 				i++;
 			}
-			putchar(TARGET_NEWLINE);
+			putc(TARGET_NEWLINE, output);
 			return 1;
 		}
 		if (!strcmp(args[0], "source"))
@@ -1521,27 +1525,17 @@ int sig;
   signal(sig, sh_handler);
 }
 
-int do_separators(aline, env)
-char *aline;
+int do_eval(phrase, env, output)
+char *phrase;
 char **env;
+FILE *output;
 {
   char filepath[MAXLINELEN];
   char *cmdtokens[MAXARGS];
   char *fin, *fout;
   int  finfd, foutfd;
   int fd,i,j,c,bgtask,nctask,result;
-	char *phrase,*phraseend;
 
-	phrase = aline;
-	do
-	{
-		/* get next run up to semi-colon separator */
-		phraseend = strchr(phrase, ';');
-		if (phraseend)
-		{
-			*phraseend = '\0';
-		}
-	
 		c = tokenize(cmdtokens, phrase);
     if (c < 1) return 0;
     
@@ -1606,7 +1600,7 @@ char **env;
 			cmdtokens[--c] = NULL;
 		}
 		
-		if (!builtins(cmdtokens, env))
+		if (!builtins(cmdtokens, env, output))
 		{
 			/* executable and found in path */
 			if (whereis(filepath, cmdtokens[0]))
@@ -1638,6 +1632,8 @@ char **env;
 						dup2(finfd, 0);
 					if (foutfd > 0)
 						dup2(foutfd, 1);
+          else
+            dup2(fileno(output), 1);  /* default to using output stream */
 
 					/* background and using stdin */
 					if (bgtask && !finfd)
@@ -1660,7 +1656,7 @@ char **env;
 				if (bgtask)
 				{
 					cmdpid[cmdcount++] = runningtask;
-					printf("[%d] %d\n", cmdcount, runningtask);
+					fprintf(output, "[%d] %d\n", cmdcount, runningtask);
 				}
 				else
 				{
@@ -1675,7 +1671,6 @@ char **env;
 						waittask();
 					}
 
-
 					signal(SIGINT, SIG_IGN);
 					signal(SIGQUIT, SIG_IGN);
 
@@ -1684,12 +1679,10 @@ char **env;
 					if (foutfd)
 						close(foutfd);
 
-
 #ifdef USE_STTY
 					/* restore terminal */
 					stty(0, &slave_orig_term_settings);
 #endif
-					
 
 #ifdef TEK4404
 					/* need to restore Event system too */
@@ -1703,10 +1696,88 @@ char **env;
 			}
 			else
 			{
-				printf("%s: command not found\n\r", cmdtokens[0]);
+				fprintf(output, "%s: command not found\n\r", cmdtokens[0]);
 			}
 		}
 
+  return 1;
+}
+
+int do_backtick(expanded, phrase, env)
+char *expanded;
+char *phrase;
+char **env;
+{
+	char *evalend;
+  FILE *output;
+  char *dst,c;
+  int rc;
+  
+  dst = expanded;
+  while((c = *phrase++))
+  {
+    if (c == '`')
+    {
+      /* closing tick */
+      evalend = strchr(phrase, '`');
+      if (evalend)
+      {
+        *evalend = '\0';
+      
+        /* this is ugly.. */
+        output = fopen("/tmp/xx", "w");
+        do_eval(phrase, env, output);
+        fclose(output);
+        
+        /* this is ugly.. */
+        output = fopen("/tmp/xx", "r");
+        /* insert output into buffer */
+        rc = fread(dst, 1,MAXLINELEN, output);
+        fclose(output);
+        if (rc > 0)
+          dst += rc - 1;
+
+        /* step past closing tick */
+        phrase = evalend + 1;
+      }
+      else
+      {
+        *dst++ = c;
+        fprintf(stderr,"no closing tick\n");
+      }
+    }
+    else
+    {
+      *dst++ = c;
+    }
+  }
+
+  *dst++ = '\0';
+  *dst++ = '\0';
+	return 0;
+}
+
+int do_separators(aline, env)
+char *aline;
+char **env;
+{
+	char *phrase,*phraseend;
+  char expanded[MAXLINELEN];
+  
+  phrase = aline;
+	do
+	{
+		/* get next run up to semi-colon separator */
+		phraseend = strchr(phrase, ';');
+		if (phraseend)
+		{
+			*phraseend = '\0';
+		}
+	
+    /* eval any backtick expressions */
+    do_backtick(expanded, phrase, env);
+    do_eval(expanded, env, stdout);
+    
 		phrase = phraseend ? phraseend + 1 : NULL;
 
 	} while(phrase);
@@ -1716,8 +1787,8 @@ char **env;
 
 int main(argc, argv, env)
 int argc;
-char **argv;
-char **env;
+char *argv[];
+char *env[];
 {
 	char filepath[MAXLINELEN];
   char *aline;
